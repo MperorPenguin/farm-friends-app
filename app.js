@@ -1,17 +1,17 @@
-/* Farm Friends — v0.2.7-alpha
-   Changes from v0.2.6:
-   - Adds section route classes on <body>: route-home / route-explore / route-match
-     so styles can tint overlays per section for better focus.
-   - No feature changes otherwise.
+/* Farm Friends — v0.2.8-alpha
+   Fix: ensure <main id="app"> is shown in Explore/Match, even if it has 'hidden'.
+   Also re-hide <main> on Home for a clean landing layout.
+   No feature changes otherwise.
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
 
   // Elements
-  const homeEl   = $('#home');
-  const sceneEl  = $('#scene');
-  const matchEl  = $('#match');
-  const btnBack  = $('#btn-back');
+  const appEl   = $('#app');       // <-- new
+  const homeEl  = $('#home');
+  const sceneEl = $('#scene');
+  const matchEl = $('#match');
+  const btnBack = $('#btn-back');
 
   // Home buttons
   const btnExplore = $('#btn-explore');
@@ -34,9 +34,6 @@
   const factDiet   = $('#fact-diet');
   const factHome   = $('#fact-home');
   const factFun    = $('#fact-fun');
-
-  // Feedback overlay
-  let fbOverlay;
 
   // State
   const audioMap = new Map();
@@ -258,17 +255,32 @@
   function showHome(){
     closeModal(); stopCurrent(false);
     setRoute('route-home');
-    homeEl?.classList.remove('hidden'); sceneEl?.classList.add('hidden'); matchEl?.classList.add('hidden'); btnBack?.classList.add('hidden');
+    // hide app container on Home (clean landing)
+    appEl?.classList.add('hidden');
+    homeEl?.classList.remove('hidden');
+    sceneEl?.classList.add('hidden');
+    matchEl?.classList.add('hidden');
+    btnBack?.classList.add('hidden');
   }
   function showExplore(){
     stopCurrent(false);
     setRoute('route-explore');
-    homeEl?.classList.add('hidden'); matchEl?.classList.add('hidden'); sceneEl?.classList.remove('hidden'); btnBack?.classList.remove('hidden');
+    // show app container and scene
+    appEl?.classList.remove('hidden');
+    homeEl?.classList.add('hidden');
+    matchEl?.classList.add('hidden');
+    sceneEl?.classList.remove('hidden');
+    btnBack?.classList.remove('hidden');
   }
   function showMatch(){
     stopCurrent(false);
     setRoute('route-match');
-    homeEl?.classList.add('hidden'); sceneEl?.classList.add('hidden'); matchEl?.classList.remove('hidden'); btnBack?.classList.remove('hidden');
+    // show app container and match
+    appEl?.classList.remove('hidden');
+    homeEl?.classList.add('hidden');
+    sceneEl?.classList.add('hidden');
+    matchEl?.classList.remove('hidden');
+    btnBack?.classList.remove('hidden');
     if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     newRound();
   }
@@ -276,7 +288,10 @@
   /* ============== INIT (robust) ============== */
   function init(){
     overlay?.classList.add('hidden'); document.body.classList.remove('modal-open');
-    preloadAudio(); renderScene(); showHome();
+    preloadAudio(); renderScene();
+
+    // Start on Home (even if someone hard-linked to /explore)
+    showHome();
 
     // Home buttons + delegated fallback
     btnExplore?.addEventListener('click', (e)=>{ e.preventDefault(); menuPuff(btnExplore); setTimeout(showExplore,120); });
