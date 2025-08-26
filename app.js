@@ -1,7 +1,7 @@
-/* Farm Friends — v0.2.5-alpha (reliability tidy)
-   - Robust navigation: handlers on DOMContentLoaded + window.load + delegated clicks
-   - Guards against overlay blocking home
-   - No feature changes vs v0.2.4
+/* Farm Friends — v0.2.6-alpha
+   Fix: correct shuffle → three choices render again.
+   Robust prompt autoplay with fallback message if blocked.
+   Keeps all features from v0.2.5 (popups, Next-only advance, explore modal, etc.)
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -22,7 +22,7 @@
   const resultEl     = $('#result');
   const matchCard    = $('.match-card', matchEl);
 
-  // Modal elements (Explore)
+  // Modal (Explore)
   const overlay    = $('#overlay');
   const modalClose = $('#modal-close');
   const modalImg   = $('#modal-img');
@@ -46,9 +46,7 @@
 
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
 
-  /* =======================
-     AUDIO (exclusive)
-  ======================= */
+  /* ============== AUDIO (exclusive) ============== */
   function createAudio(src) {
     const a = new Audio(src);
     a.preload = 'auto';
@@ -81,17 +79,21 @@
   }
   function playAnimalSound(id) {
     const next = audioMap.get(id);
-    if (!next) return;
+    if (!next) return Promise.resolve();
+
     if (currentId === id) stopCurrent(false); else stopCurrent(true);
+
     try {
       next.currentTime = 0; next.volume = 0; currentId = id;
-      next.play().then(() => fade(next, 0, 1, 140)).catch(()=>{});
-    } catch {}
+      return next.play()
+        .then(() => fade(next, 0, 1, 140))
+        .catch((err) => { /* bubble so caller can show fallback */ throw err; });
+    } catch (e) {
+      return Promise.reject(e);
+    }
   }
 
-  /* =======================
-     UI Flourishes
-  ======================= */
+  /* ============== UI FLOURISHES ============== */
   function menuPuff(btn) {
     if (!btn) return;
     const puff = document.createElement('div');
@@ -137,9 +139,7 @@
     card.appendChild(burst); setTimeout(() => burst.remove(), 700);
   }
 
-  /* =======================
-     Explore modal
-  ======================= */
+  /* ============== EXPLORE MODAL ============== */
   function openModal(animal, triggerEl) {
     if (!animal) return;
     stopCurrent(false);
@@ -160,7 +160,7 @@
 
     if (modalPlay) modalPlay.onclick = () => { stopCurrent(false); playAnimalSound(animal.id); };
 
-    playAnimalSound(animal.id);
+    playAnimalSound(animal.id).catch(()=>{});
     modalClose?.focus();
   }
   function closeModal() {
@@ -175,9 +175,7 @@
     }, 220);
   }
 
-  /* =======================
-     Explore scene
-  ======================= */
+  /* ============== EXPLORE SCENE ============== */
   function renderScene() {
     if (!sceneEl) return;
     sceneEl.innerHTML = '';
@@ -207,9 +205,7 @@
     });
   }
 
-  /* =======================
-     Feedback popup (for Match)
-  ======================= */
+  /* ============== FEEDBACK POPUP (Match) ============== */
   function ensureFeedbackOverlay() {
     if (fbOverlay) return fbOverlay;
     fbOverlay = document.createElement('div');
@@ -264,23 +260,25 @@
     else { fbOverlay.classList.add('hidden'); }
   }
 
-  /* =======================
-     Match game (advance via Next)
-  ======================= */
+  /* ============== MATCH GAME ============== */
   function randInt(n) { return Math.floor(Math.random() * n); }
   function sample(array, count) {
     const copy = array.slice(); const out = [];
     while (copy.length && out.length < count) out.push(copy.splice(randInt(copy.length), 1)[0]);
     return out;
   }
+  // FIXED Fisher–Yates shuffle
   function shuffle(array) {
     const copy = array.slice();
     for (let i = copy.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [copy[i], copy[j]] = [copy[j]], [copy[i]];
+      const tmp = copy[i];
+      copy[i] = copy[j];
+      copy[j] = tmp;
     }
     return copy;
   }
+
   function animateMatchSwap(cb) {
     if (!matchCard) { cb && cb(); return; }
     matchCard.classList.add('swap-out');
@@ -291,6 +289,7 @@
       setTimeout(() => matchCard.classList.remove('swap-in'), 220);
     }, 220);
   }
+
   function newRound() {
     stopCurrent(false);
     if (resultEl) resultEl.textContent = '';
@@ -302,12 +301,16 @@
 
     renderChoices(pool);
 
+    // Prompt autoplay (robust): if blocked, ask to tap Replay.
     setTimeout(() => {
       stopCurrent(false);
-      playAnimalSound(answer.id);
+      playAnimalSound(answer.id).catch(() => {
+        if (resultEl) resultEl.textContent = 'Tap “Replay sound” to hear the clue.';
+      });
       if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     }, 200);
   }
+
   function renderChoices(animals) {
     if (!choicesEl) return;
     choicesEl.innerHTML = '';
@@ -330,7 +333,7 @@
 
         if (picked.id === answer.id) {
           btn.classList.add('correct');
-          playAnimalSound(answer.id);
+          playAnimalSound(answer.id).catch(()=>{});
           const msg = `You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
           showFeedback({
             correct: true,
@@ -349,7 +352,7 @@
             primaryLabel: 'Keep guessing',
             onPrimary: () => {},
             secondaryLabel: 'Listen again',
-            onSecondary: () => { stopCurrent(false); playAnimalSound(answer.id); }
+            onSecondary: () => { stopCurrent(false); playAnimalSound(answer.id).catch(()=>{}); }
           });
         }
       });
@@ -358,9 +361,7 @@
     });
   }
 
-  /* =======================
-     Buttons & Navigation
-  ======================= */
+  /* ============== BUTTONS & NAV ============== */
   function btnPlayHTML(label = 'Play') {
     return `
       <span class="btn-ico" aria-hidden="true">
@@ -374,7 +375,9 @@
   function playCurrentPrompt() {
     if (!currentRound) return;
     stopCurrent(false);
-    playAnimalSound(currentRound.answerId);
+    playAnimalSound(currentRound.answerId).catch(() => {
+      if (resultEl) resultEl.textContent = 'Tap “Replay sound” to hear the clue.';
+    });
     if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
   }
 
@@ -403,11 +406,9 @@
     newRound();
   }
 
-  /* =======================
-     INIT (robust)
-  ======================= */
+  /* ============== INIT (robust) ============== */
   function init() {
-    // If something left the overlay visible, hide it to avoid blocking clicks.
+    // hide any stray overlay
     overlay?.classList.add('hidden');
     document.body.classList.remove('modal-open');
 
@@ -419,7 +420,7 @@
     btnExplore?.addEventListener('click', (e) => { e.preventDefault(); menuPuff(btnExplore); setTimeout(showExplore, 120); });
     btnMatch?.addEventListener('click',   (e) => { e.preventDefault(); menuPuff(btnMatch);   setTimeout(showMatch, 120); });
 
-    // Delegated fallback (in case direct listeners didn’t bind)
+    // Delegated fallback
     document.addEventListener('click', (e) => {
       const target = e.target.closest?.('#btn-explore, #btn-match, #btn-back');
       if (!target) return;
@@ -432,7 +433,7 @@
     // Back
     btnBack?.addEventListener('click', (e) => { e.preventDefault(); showHome(); });
 
-    // Match buttons
+    // Match controls
     if (playSoundBtn) {
       playSoundBtn.classList.add('btn', 'btn-hero', 'btn-lg');
       playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
@@ -444,11 +445,10 @@
     overlay?.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
 
-    // Modal play theme
+    // Modal play style
     if (modalPlay) {
       modalPlay.classList.add('btn', 'btn-hero', 'btn-lg');
       modalPlay.innerHTML = btnPlayHTML('Play sound');
-      modalPlay.addEventListener('click', (e) => { e.preventDefault(); /* handler set in openModal */ });
     }
 
     // iOS audio unlock
@@ -458,7 +458,6 @@
     }, { once: true });
   }
 
-  // Try both DOMContentLoaded and window.load (some browsers/extensions can delay one)
   document.addEventListener('DOMContentLoaded', init);
   window.addEventListener('load', init);
 })();
