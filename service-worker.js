@@ -32,6 +32,9 @@ const PRECACHE_URLS = [
   '/assets/img/goat.png',
   '/assets/img/horse.png',
   '/assets/img/donkey.png',
+  '/assets/brand/background.png',
+  '/assets/brand/logo.png',
+
 
   // Animal audio (mp3 as you said)
   '/assets/audio/cow.mp3',

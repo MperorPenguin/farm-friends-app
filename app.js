@@ -1,7 +1,8 @@
-/* Farm Friends — v0.2.6-alpha
-   Fix: correct shuffle → three choices render again.
-   Robust prompt autoplay with fallback message if blocked.
-   Keeps all features from v0.2.5 (popups, Next-only advance, explore modal, etc.)
+/* Farm Friends — v0.2.7-alpha
+   Changes from v0.2.6:
+   - Adds section route classes on <body>: route-home / route-explore / route-match
+     so styles can tint overlays per section for better focus.
+   - No feature changes otherwise.
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -47,170 +48,114 @@
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
 
   /* ============== AUDIO (exclusive) ============== */
-  function createAudio(src) {
-    const a = new Audio(src);
-    a.preload = 'auto';
-    a.setAttribute('aria-hidden', 'true');
-    a.volume = 1;
-    return a;
+  function createAudio(src){ const a=new Audio(src); a.preload='auto'; a.setAttribute('aria-hidden','true'); a.volume=1; return a; }
+  function preloadAudio(){ (ANIMALS||[]).forEach(animal=>{ if(!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound)); }); }
+  function fade(audio, from, to, ms, done){
+    if(!audio){ done&&done(); return; }
+    if(fadeInterval) clearInterval(fadeInterval);
+    const steps=10, step=(to-from)/steps, interval=Math.max(10, ms/steps); let i=0; audio.volume=from;
+    fadeInterval=setInterval(()=>{ i++; audio.volume=Math.max(0,Math.min(1,from+step*i));
+      if(i>=steps){ clearInterval(fadeInterval); audio.volume=to; done&&done(); } }, interval);
   }
-  function preloadAudio() {
-    (ANIMALS || []).forEach(animal => {
-      if (!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound));
-    });
+  function stopCurrent(smooth=true){
+    if(!currentId) return;
+    const a=audioMap.get(currentId); if(!a){ currentId=null; return; }
+    if(smooth) fade(a, a.volume??1, 0, 140, ()=>{ try{ a.pause(); a.currentTime=0; }catch{} });
+    else { try{ a.pause(); a.currentTime=0; }catch{} }
+    currentId=null;
   }
-  function fade(audio, from, to, ms, done) {
-    if (!audio) { done && done(); return; }
-    if (fadeInterval) clearInterval(fadeInterval);
-    const steps = 10, step = (to - from) / steps, interval = Math.max(10, ms / steps);
-    let i = 0; audio.volume = from;
-    fadeInterval = setInterval(() => {
-      i++; audio.volume = Math.max(0, Math.min(1, from + step * i));
-      if (i >= steps) { clearInterval(fadeInterval); audio.volume = to; done && done(); }
-    }, interval);
-  }
-  function stopCurrent(smooth = true) {
-    if (!currentId) return;
-    const a = audioMap.get(currentId);
-    if (!a) { currentId = null; return; }
-    if (smooth) fade(a, a.volume ?? 1, 0, 140, () => { try { a.pause(); a.currentTime = 0; } catch {} });
-    else { try { a.pause(); a.currentTime = 0; } catch {} }
-    currentId = null;
-  }
-  function playAnimalSound(id) {
-    const next = audioMap.get(id);
-    if (!next) return Promise.resolve();
-
-    if (currentId === id) stopCurrent(false); else stopCurrent(true);
-
-    try {
-      next.currentTime = 0; next.volume = 0; currentId = id;
-      return next.play()
-        .then(() => fade(next, 0, 1, 140))
-        .catch((err) => { /* bubble so caller can show fallback */ throw err; });
-    } catch (e) {
-      return Promise.reject(e);
-    }
+  function playAnimalSound(id){
+    const next=audioMap.get(id); if(!next) return Promise.resolve();
+    if(currentId===id) stopCurrent(false); else stopCurrent(true);
+    try{
+      next.currentTime=0; next.volume=0; currentId=id;
+      return next.play().then(()=>fade(next,0,1,140)).catch(err=>{ throw err; });
+    }catch(e){ return Promise.reject(e); }
   }
 
   /* ============== UI FLOURISHES ============== */
-  function menuPuff(btn) {
-    if (!btn) return;
-    const puff = document.createElement('div');
-    puff.className = 'menu-burst';
-    const rect = btn.getBoundingClientRect();
-    const w = rect.width, h = rect.height, count = 14;
-    for (let i = 0; i < count; i++) {
-      const s = document.createElement('span'); s.className = 'menu-spark';
-      const x = Math.random() * w * 0.8 + w * 0.1;
-      const y = Math.random() * h * 0.6 + h * 0.2;
-      const tx = (Math.random() - 0.5) * 140;
-      const ty = - (40 + Math.random() * 90);
-      const size = 6 + Math.random() * 12;
-      s.style.setProperty('--x', Math.round(x) + 'px');
-      s.style.setProperty('--y', Math.round(y) + 'px');
-      s.style.setProperty('--tx', Math.round(tx) + 'px');
-      s.style.setProperty('--ty', Math.round(ty) + 'px');
-      s.style.setProperty('--sz', Math.round(size) + 'px');
-      s.style.setProperty('--d', (420 + Math.random()*280) + 'ms');
-      puff.appendChild(s);
-    }
-    btn.appendChild(puff); setTimeout(() => puff.remove(), 720);
+  function menuPuff(btn){
+    if(!btn) return; const puff=document.createElement('div'); puff.className='menu-burst';
+    const rect=btn.getBoundingClientRect(); const w=rect.width,h=rect.height,count=14;
+    for(let i=0;i<count;i++){ const s=document.createElement('span'); s.className='menu-spark';
+      const x=Math.random()*w*0.8+w*0.1; const y=Math.random()*h*0.6+h*0.2;
+      const tx=(Math.random()-0.5)*140; const ty=-(40+Math.random()*90);
+      const size=8+Math.random()*12;
+      s.style.setProperty('--x',Math.round(x)+'px'); s.style.setProperty('--y',Math.round(y)+'px');
+      s.style.setProperty('--tx',Math.round(tx)+'px'); s.style.setProperty('--ty',Math.round(ty)+'px');
+      s.style.setProperty('--sz',Math.round(size)+'px'); s.style.setProperty('--d',(420+Math.random()*280)+'ms');
+      puff.appendChild(s); }
+    btn.appendChild(puff); setTimeout(()=>puff.remove(),720);
   }
-  function sparkBurst(card) {
-    if (!card) return;
-    const burst = document.createElement('div'); burst.className = 'burst';
-    const rect = card.getBoundingClientRect(), w = rect.width, h = rect.height, count = 12;
-    for (let i = 0; i < count; i++) {
-      const s = document.createElement('span'); s.className = 'spark';
-      const x = Math.random() * w * 0.9 + w * 0.05;
-      const y = Math.random() * h * 0.7 + h * 0.15;
-      const tx = (Math.random() - 0.5) * 120;
-      const ty = - (40 + Math.random() * 80);
-      const size = 6 + Math.random() * 10;
-      s.style.setProperty('--x', Math.round(x) + 'px');
-      s.style.setProperty('--y', Math.round(y) + 'px');
-      s.style.setProperty('--tx', Math.round(tx) + 'px');
-      s.style.setProperty('--ty', Math.round(ty) + 'px');
-      s.style.setProperty('--sz', Math.round(size) + 'px');
-      s.style.setProperty('--d', (450 + Math.random()*250) + 'ms');
-      burst.appendChild(s);
-    }
-    card.appendChild(burst); setTimeout(() => burst.remove(), 700);
+  function sparkBurst(card){
+    if(!card) return; const burst=document.createElement('div'); burst.className='burst';
+    const rect=card.getBoundingClientRect(); const w=rect.width,h=rect.height,count=12;
+    for(let i=0;i<count;i++){ const s=document.createElement('span'); s.className='spark';
+      const x=Math.random()*w*0.9+w*0.05; const y=Math.random()*h*0.7+h*0.15;
+      const tx=(Math.random()-0.5)*120; const ty=-(40+Math.random()*80);
+      const size=6+Math.random()*10;
+      s.style.setProperty('--x',Math.round(x)+'px'); s.style.setProperty('--y',Math.round(y)+'px');
+      s.style.setProperty('--tx',Math.round(tx)+'px'); s.style.setProperty('--ty',Math.round(ty)+'px');
+      s.style.setProperty('--sz',Math.round(size)+'px'); s.style.setProperty('--d',(450+Math.random()*250)+'ms');
+      burst.appendChild(s); }
+    card.appendChild(burst); setTimeout(()=>burst.remove(),700);
   }
 
   /* ============== EXPLORE MODAL ============== */
-  function openModal(animal, triggerEl) {
-    if (!animal) return;
-    stopCurrent(false);
-
+  function openModal(animal, triggerEl){
+    if(!animal) return; stopCurrent(false);
     lastFocused = triggerEl || document.activeElement;
     document.body.classList.add('modal-open');
-    overlay?.classList.remove('hidden', 'closing');
-    overlay?.setAttribute('aria-hidden', 'false');
+    overlay?.classList.remove('hidden','closing'); overlay?.setAttribute('aria-hidden','false');
 
-    if (modalTitle) modalTitle.textContent = animal.name || '';
-    if (modalImg) { modalImg.src = animal.image || ''; modalImg.alt = animal.name || ''; }
+    if(modalTitle) modalTitle.textContent = animal.name || '';
+    if(modalImg){ modalImg.src = animal.image || ''; modalImg.alt = animal.name || ''; }
+    if(factType)    factType.textContent    = animal.type    || '';
+    if(factHabitat) factHabitat.textContent = animal.habitat || '';
+    if(factDiet)    factDiet.textContent    = animal.diet    || '';
+    if(factHome)    factHome.textContent    = animal.home    || '';
+    if(factFun)     factFun.textContent     = animal.fun     || '';
 
-    if (factType)    factType.textContent = animal.type || '';
-    if (factHabitat) factHabitat.textContent = animal.habitat || '';
-    if (factDiet)    factDiet.textContent = animal.diet || '';
-    if (factHome)    factHome.textContent = animal.home || '';
-    if (factFun)     factFun.textContent = animal.fun || '';
-
-    if (modalPlay) modalPlay.onclick = () => { stopCurrent(false); playAnimalSound(animal.id); };
-
+    if(modalPlay) modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id); };
     playAnimalSound(animal.id).catch(()=>{});
     modalClose?.focus();
   }
-  function closeModal() {
+  function closeModal(){
     stopCurrent(false);
-    if (!overlay) return;
+    if(!overlay) return;
     overlay.classList.add('closing');
-    setTimeout(() => {
-      overlay.classList.add('hidden');
-      overlay.setAttribute('aria-hidden', 'true');
+    setTimeout(()=>{
+      overlay.classList.add('hidden'); overlay.setAttribute('aria-hidden','true');
       document.body.classList.remove('modal-open');
-      if (lastFocused && lastFocused.focus) lastFocused.focus();
-    }, 220);
+      if(lastFocused && lastFocused.focus) lastFocused.focus();
+    },220);
   }
 
   /* ============== EXPLORE SCENE ============== */
-  function renderScene() {
-    if (!sceneEl) return;
-    sceneEl.innerHTML = '';
-    (ANIMALS || []).forEach(a => {
-      const card = document.createElement('button');
-      card.className = 'animal';
-      card.style.background = a.color || 'var(--card)';
+  function renderScene(){
+    if(!sceneEl) return; sceneEl.innerHTML='';
+    (ANIMALS||[]).forEach(a=>{
+      const card=document.createElement('button'); card.className='animal';
+      card.style.background = a.color || 'var(--card)'; card.dataset.id=a.id;
       card.setAttribute('aria-label', `${a.name} — open card`);
-      card.dataset.id = a.id;
-
-      const img = document.createElement('img');
-      img.src = a.image; img.alt = a.name;
-      const name = document.createElement('div');
-      name.className = 'animal-name'; name.textContent = a.name;
-
+      const img=document.createElement('img'); img.src=a.image; img.alt=a.name;
+      const name=document.createElement('div'); name.className='animal-name'; name.textContent=a.name;
       card.appendChild(img); card.appendChild(name);
-
-      card.addEventListener('click', () => {
-        card.classList.add('selected');
-        card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
-        sparkBurst(card);
-        setTimeout(() => card.classList.remove('selected'), 550);
+      card.addEventListener('click', ()=>{
+        card.classList.add('selected'); card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
+        sparkBurst(card); setTimeout(()=>card.classList.remove('selected'),550);
         openModal(a, card);
       });
-
       sceneEl.appendChild(card);
     });
   }
 
   /* ============== FEEDBACK POPUP (Match) ============== */
-  function ensureFeedbackOverlay() {
-    if (fbOverlay) return fbOverlay;
-    fbOverlay = document.createElement('div');
-    fbOverlay.className = 'feedback-overlay hidden';
-    fbOverlay.innerHTML = `
+  let fbOverlayEl;
+  function ensureFeedbackOverlay(){
+    if(fbOverlayEl) return fbOverlayEl;
+    fbOverlayEl=document.createElement('div'); fbOverlayEl.className='feedback-overlay hidden';
+    fbOverlayEl.innerHTML=`
       <div class="feedback-card" role="dialog" aria-modal="true" aria-live="assertive">
         <div class="fb-icon" aria-hidden="true"></div>
         <div class="fb-title" id="fb-title"></div>
@@ -219,243 +164,155 @@
           <button id="fb-secondary" class="btn btn-hero btn-lg hidden"></button>
           <button id="fb-primary" class="btn btn-hero btn-lg"></button>
         </div>
-      </div>
-    `;
-    document.body.appendChild(fbOverlay);
-    return fbOverlay;
+      </div>`;
+    document.body.appendChild(fbOverlayEl); return fbOverlayEl;
   }
-  function showFeedback({ correct, title, message, primaryLabel, onPrimary, secondaryLabel, onSecondary }) {
-    const el = ensureFeedbackOverlay();
-    const titleEl = $('#fb-title', el);
-    const msgEl   = $('#fb-message', el);
-    const primary = $('#fb-primary', el);
-    const secondary = $('#fb-secondary', el);
-    const card = $('.feedback-card', el);
-
-    el.classList.remove('hidden');
-    el.classList.toggle('correct', !!correct);
-    el.classList.toggle('incorrect', !correct);
+  function showFeedback({correct,title,message,primaryLabel,onPrimary,secondaryLabel,onSecondary}){
+    const el=ensureFeedbackOverlay(); const titleEl=$('#fb-title',el);
+    const msgEl=$('#fb-message',el); const primary=$('#fb-primary',el);
+    const secondary=$('#fb-secondary',el); const card=$('.feedback-card',el);
+    el.classList.remove('hidden'); el.classList.toggle('correct',!!correct); el.classList.toggle('incorrect',!correct);
     card?.classList.remove('out');
-
-    if (titleEl)   titleEl.textContent = title || (correct ? 'Well done!' : 'Nice try!');
-    if (msgEl)     msgEl.innerHTML = message || '';
-    if (primary) {
-      primary.textContent = primaryLabel || (correct ? 'Next' : 'OK');
-      primary.onclick = () => { onPrimary && onPrimary(); hideFeedback(); };
-    }
-    if (secondaryLabel && secondary) {
-      secondary.classList.remove('hidden');
-      secondary.textContent = secondaryLabel;
-      secondary.onclick = () => { onSecondary && onSecondary(); hideFeedback(false); };
-    } else if (secondary) {
-      secondary.classList.add('hidden');
-      secondary.onclick = null;
-    }
-    setTimeout(() => primary?.focus(), 10);
+    if(titleEl) titleEl.textContent = title || (correct?'Well done!':'Nice try!');
+    if(msgEl)   msgEl.innerHTML    = message || '';
+    if(primary){ primary.textContent = primaryLabel || (correct?'Next':'OK'); primary.onclick=()=>{ onPrimary&&onPrimary(); hideFeedback(); }; }
+    if(secondaryLabel && secondary){
+      secondary.classList.remove('hidden'); secondary.textContent=secondaryLabel;
+      secondary.onclick=()=>{ onSecondary&&onSecondary(); hideFeedback(false); };
+    }else if(secondary){ secondary.classList.add('hidden'); secondary.onclick=null; }
+    setTimeout(()=>primary?.focus(),10);
   }
-  function hideFeedback(animateOut = true) {
-    if (!fbOverlay) return;
-    const card = $('.feedback-card', fbOverlay);
-    if (animateOut) { card?.classList.add('out'); setTimeout(() => fbOverlay.classList.add('hidden'), 200); }
-    else { fbOverlay.classList.add('hidden'); }
+  function hideFeedback(animateOut=true){
+    if(!fbOverlayEl) return; const card=$('.feedback-card',fbOverlayEl);
+    if(animateOut){ card?.classList.add('out'); setTimeout(()=>fbOverlayEl.classList.add('hidden'),200); }
+    else fbOverlayEl.classList.add('hidden');
   }
 
   /* ============== MATCH GAME ============== */
-  function randInt(n) { return Math.floor(Math.random() * n); }
-  function sample(array, count) {
-    const copy = array.slice(); const out = [];
-    while (copy.length && out.length < count) out.push(copy.splice(randInt(copy.length), 1)[0]);
-    return out;
-  }
-  // FIXED Fisher–Yates shuffle
-  function shuffle(array) {
-    const copy = array.slice();
-    for (let i = copy.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const tmp = copy[i];
-      copy[i] = copy[j];
-      copy[j] = tmp;
-    }
-    return copy;
+  function randInt(n){ return Math.floor(Math.random()*n); }
+  function sample(arr,count){ const copy=arr.slice(); const out=[]; while(copy.length && out.length<count){ out.push(copy.splice(randInt(copy.length),1)[0]); } return out; }
+  function shuffle(arr){ const copy=arr.slice(); for(let i=copy.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=copy[i]; copy[i]=copy[j]; copy[j]=t; } return copy; }
+
+  function animateMatchSwap(cb){
+    if(!matchCard){ cb&&cb(); return; }
+    matchCard.classList.add('swap-out'); setTimeout(()=>{ cb&&cb(); matchCard.classList.remove('swap-out'); matchCard.classList.add('swap-in'); setTimeout(()=>matchCard.classList.remove('swap-in'),220); },220);
   }
 
-  function animateMatchSwap(cb) {
-    if (!matchCard) { cb && cb(); return; }
-    matchCard.classList.add('swap-out');
-    setTimeout(() => {
-      cb && cb();
-      matchCard.classList.remove('swap-out');
-      matchCard.classList.add('swap-in');
-      setTimeout(() => matchCard.classList.remove('swap-in'), 220);
-    }, 220);
-  }
-
-  function newRound() {
-    stopCurrent(false);
-    if (resultEl) resultEl.textContent = '';
-
-    const choicesCount = Math.min(3, (ANIMALS || []).length);
-    const pool = sample(ANIMALS, choicesCount);
-    const answer = pool[randInt(pool.length)];
-    currentRound = { answerId: answer.id, choiceIds: pool.map(a => a.id) };
-
+  function newRound(){
+    stopCurrent(false); if(resultEl) resultEl.textContent='';
+    const choicesCount=Math.min(3,(ANIMALS||[]).length);
+    const pool=sample(ANIMALS, choicesCount); const answer=pool[randInt(pool.length)];
+    currentRound={ answerId: answer.id, choiceIds: pool.map(a=>a.id) };
     renderChoices(pool);
-
-    // Prompt autoplay (robust): if blocked, ask to tap Replay.
-    setTimeout(() => {
+    setTimeout(()=>{
       stopCurrent(false);
-      playAnimalSound(answer.id).catch(() => {
-        if (resultEl) resultEl.textContent = 'Tap “Replay sound” to hear the clue.';
-      });
-      if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-    }, 200);
+      playAnimalSound(answer.id).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
+      if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+    },200);
   }
 
-  function renderChoices(animals) {
-    if (!choicesEl) return;
-    choicesEl.innerHTML = '';
-    shuffle(animals).forEach(a => {
-      const btn = document.createElement('button');
-      btn.className = 'choice';
-      btn.setAttribute('aria-label', a.name);
-      btn.dataset.id = a.id;
-
-      const img = document.createElement('img');
-      img.src = a.image; img.alt = a.name;
-      btn.appendChild(img);
-
-      btn.addEventListener('click', () => {
-        const answer = getAnimal(currentRound?.answerId);
-        if (!answer) return;
-        const picked = a;
-
+  function renderChoices(animals){
+    if(!choicesEl) return; choicesEl.innerHTML='';
+    shuffle(animals).forEach(a=>{
+      const btn=document.createElement('button'); btn.className='choice'; btn.setAttribute('aria-label',a.name); btn.dataset.id=a.id;
+      const img=document.createElement('img'); img.src=a.image; img.alt=a.name; btn.appendChild(img);
+      btn.addEventListener('click', ()=>{
+        const answer = getAnimal(currentRound?.answerId); if(!answer) return;
         stopCurrent(false);
-
-        if (picked.id === answer.id) {
-          btn.classList.add('correct');
-          playAnimalSound(answer.id).catch(()=>{});
-          const msg = `You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
-          showFeedback({
-            correct: true,
-            title: 'Well done!',
-            message: msg,
-            primaryLabel: 'Next',
-            onPrimary: () => { stopCurrent(false); animateMatchSwap(() => newRound()); }
-          });
-        } else {
+        if(a.id===answer.id){
+          btn.classList.add('correct'); playAnimalSound(answer.id).catch(()=>{});
+          const msg=`You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
+          showFeedback({ correct:true, title:'Well done!', message:msg, primaryLabel:'Next', onPrimary:()=>{ stopCurrent(false); animateMatchSwap(()=>newRound()); } });
+        }else{
           btn.classList.add('incorrect');
-          const msg = `That was the <b>${picked.name}</b> — ${picked.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
+          const msg=`That was the <b>${a.name}</b> — ${a.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
           showFeedback({
-            correct: false,
-            title: 'Nice try!',
-            message: msg,
-            primaryLabel: 'Keep guessing',
-            onPrimary: () => {},
-            secondaryLabel: 'Listen again',
-            onSecondary: () => { stopCurrent(false); playAnimalSound(answer.id).catch(()=>{}); }
+            correct:false, title:'Nice try!', message:msg,
+            primaryLabel:'Keep guessing', onPrimary:()=>{},
+            secondaryLabel:'Listen again', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id).catch(()=>{}); }
           });
         }
       });
-
       choicesEl.appendChild(btn);
     });
   }
 
-  /* ============== BUTTONS & NAV ============== */
-  function btnPlayHTML(label = 'Play') {
-    return `
-      <span class="btn-ico" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
-          <path d="M8 5v14l11-7z"></path>
-        </svg>
-      </span>
-      <span class="btn-label">${label}</span>
-    `;
-  }
-  function playCurrentPrompt() {
-    if (!currentRound) return;
-    stopCurrent(false);
-    playAnimalSound(currentRound.answerId).catch(() => {
-      if (resultEl) resultEl.textContent = 'Tap “Replay sound” to hear the clue.';
-    });
-    if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+  /* ============== Buttons & Navigation ============== */
+  function btnPlayHTML(label='Play'){ return `
+    <span class="btn-ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+        <path d="M8 5v14l11-7z"></path>
+      </svg>
+    </span>
+    <span class="btn-label">${label}</span>`; }
+  function playCurrentPrompt(){
+    if(!currentRound) return; stopCurrent(false);
+    playAnimalSound(currentRound.answerId).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
+    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
   }
 
-  function showHome() {
-    closeModal();
-    stopCurrent(false);
-    homeEl?.classList.remove('hidden');
-    sceneEl?.classList.add('hidden');
-    matchEl?.classList.add('hidden');
-    btnBack?.classList.add('hidden');
+  function setRoute(route){
+    document.body.classList.remove('route-home','route-explore','route-match');
+    document.body.classList.add(route);
   }
-  function showExplore() {
-    stopCurrent(false);
-    homeEl?.classList.add('hidden');
-    matchEl?.classList.add('hidden');
-    sceneEl?.classList.remove('hidden');
-    btnBack?.classList.remove('hidden');
+  function showHome(){
+    closeModal(); stopCurrent(false);
+    setRoute('route-home');
+    homeEl?.classList.remove('hidden'); sceneEl?.classList.add('hidden'); matchEl?.classList.add('hidden'); btnBack?.classList.add('hidden');
   }
-  function showMatch() {
+  function showExplore(){
     stopCurrent(false);
-    homeEl?.classList.add('hidden');
-    sceneEl?.classList.add('hidden');
-    matchEl?.classList.remove('hidden');
-    btnBack?.classList.remove('hidden');
-    if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+    setRoute('route-explore');
+    homeEl?.classList.add('hidden'); matchEl?.classList.add('hidden'); sceneEl?.classList.remove('hidden'); btnBack?.classList.remove('hidden');
+  }
+  function showMatch(){
+    stopCurrent(false);
+    setRoute('route-match');
+    homeEl?.classList.add('hidden'); sceneEl?.classList.add('hidden'); matchEl?.classList.remove('hidden'); btnBack?.classList.remove('hidden');
+    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     newRound();
   }
 
   /* ============== INIT (robust) ============== */
-  function init() {
-    // hide any stray overlay
-    overlay?.classList.add('hidden');
-    document.body.classList.remove('modal-open');
+  function init(){
+    overlay?.classList.add('hidden'); document.body.classList.remove('modal-open');
+    preloadAudio(); renderScene(); showHome();
 
-    preloadAudio();
-    renderScene();
-    showHome();
-
-    // Direct listeners
-    btnExplore?.addEventListener('click', (e) => { e.preventDefault(); menuPuff(btnExplore); setTimeout(showExplore, 120); });
-    btnMatch?.addEventListener('click',   (e) => { e.preventDefault(); menuPuff(btnMatch);   setTimeout(showMatch, 120); });
-
-    // Delegated fallback
-    document.addEventListener('click', (e) => {
-      const target = e.target.closest?.('#btn-explore, #btn-match, #btn-back');
-      if (!target) return;
-      e.preventDefault();
-      if (target.id === 'btn-explore') { menuPuff(target); setTimeout(showExplore, 100); }
-      else if (target.id === 'btn-match') { menuPuff(target); setTimeout(showMatch, 100); }
-      else if (target.id === 'btn-back') { showHome(); }
+    // Home buttons + delegated fallback
+    btnExplore?.addEventListener('click', (e)=>{ e.preventDefault(); menuPuff(btnExplore); setTimeout(showExplore,120); });
+    btnMatch  ?.addEventListener('click', (e)=>{ e.preventDefault(); menuPuff(btnMatch);   setTimeout(showMatch,120); });
+    document.addEventListener('click', (e)=>{
+      const t=e.target.closest?.('#btn-explore,#btn-match,#btn-back');
+      if(!t) return; e.preventDefault();
+      if(t.id==='btn-explore'){ menuPuff(t); setTimeout(showExplore,100); }
+      else if(t.id==='btn-match'){ menuPuff(t); setTimeout(showMatch,100); }
+      else if(t.id==='btn-back'){ showHome(); }
     });
 
     // Back
-    btnBack?.addEventListener('click', (e) => { e.preventDefault(); showHome(); });
+    btnBack?.addEventListener('click', (e)=>{ e.preventDefault(); showHome(); });
 
     // Match controls
-    if (playSoundBtn) {
-      playSoundBtn.classList.add('btn', 'btn-hero', 'btn-lg');
+    if(playSoundBtn){
+      playSoundBtn.classList.add('btn','btn-hero','btn-lg');
       playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-      playSoundBtn.addEventListener('click', (e) => { e.preventDefault(); playCurrentPrompt(); });
+      playSoundBtn.addEventListener('click', (e)=>{ e.preventDefault(); playCurrentPrompt(); });
     }
 
-    // Modal close
-    modalClose?.addEventListener('click', (e) => { e.preventDefault(); closeModal(); });
-    overlay?.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
-
-    // Modal play style
-    if (modalPlay) {
-      modalPlay.classList.add('btn', 'btn-hero', 'btn-lg');
+    // Modal
+    modalClose?.addEventListener('click', (e)=>{ e.preventDefault(); closeModal(); });
+    overlay?.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
+    document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
+    if(modalPlay){
+      modalPlay.classList.add('btn','btn-hero','btn-lg');
       modalPlay.innerHTML = btnPlayHTML('Play sound');
     }
 
     // iOS audio unlock
-    window.addEventListener('touchstart', () => {
+    window.addEventListener('touchstart', ()=>{
       const any = audioMap.values().next().value;
-      if (any && any.paused) { any.play().then(() => any.pause()).catch(()=>{}); }
-    }, { once: true });
+      if(any && any.paused){ any.play().then(()=>any.pause()).catch(()=>{}); }
+    }, { once:true });
   }
 
   document.addEventListener('DOMContentLoaded', init);

@@ -1,121 +1,189 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-  <title>Farm Friends</title>
-  <meta name="description" content="A toddler-friendly interactive farm with animal sounds, facts and games.">
-  <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#67c23a">
-  <link rel="stylesheet" href="styles.css">
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"
+    />
+    <title>Farm Friends</title>
+    <meta name="description" content="Tap, listen, learn & giggle! Farm Friends for toddlers." />
+    <meta name="theme-color" content="#f3c64e" />
 
-  <!-- HOME / LANDING -->
-  <section id="home" class="home" aria-label="Farm Friends start menu">
-    <div class="home-inner">
-      <div class="brand">
-        <img src="assets/img/cow.png" alt="" aria-hidden="true" class="brand-critters cow">
-        <img src="assets/img/chicken.png" alt="" aria-hidden="true" class="brand-critters chicken">
-        <h1 class="logo">Farm Friends</h1>
-        <p class="tag">Tap, listen, learn & giggle!</p>
-      </div>
+    <!-- Optional: friendly rounded font (Baloo 2). Remove if you prefer fully-offline only. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;700;800&display=swap" rel="stylesheet" />
 
-      <div class="menu">
-        <button id="btn-explore" class="menu-card" aria-label="Animal Sounds and Facts">
-          <img src="assets/img/horse.png" alt="" aria-hidden="true">
-          <div>
-            <div class="title">Animal Sounds &amp; Facts</div>
-            <div class="subtitle">Tap an animal, hear its sound, learn fun bits!</div>
-          </div>
-        </button>
+    <!-- Preload the universal background for faster first paint -->
+    <link rel="preload" as="image" href="assets/brand/background.png" />
+    <!-- Preload logo (optional) -->
+    <link rel="preload" as="image" href="assets/brand/logo.png" />
 
-        <button id="btn-match" class="menu-card" aria-label="Guess the Sound game">
-          <img src="assets/img/duck.png" alt="" aria-hidden="true">
-          <div>
-            <div class="title">Guess the Sound!</div>
-            <div class="subtitle">Which animal made that noise?</div>
-          </div>
-        </button>
+    <!-- App styles -->
+    <link rel="stylesheet" href="styles.css" />
 
-        <button id="btn-story" class="menu-card disabled" aria-label="Story Time (coming soon)" disabled>
-          <img src="assets/img/sheep.png" alt="" aria-hidden="true">
-          <div>
-            <div class="title">Story Time</div>
-            <div class="subtitle">Coming soon — cosy farm tales.</div>
-          </div>
-        </button>
+    <!-- PWA (optional) -->
+    <link rel="manifest" href="manifest.webmanifest" />
+    <!-- <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/icon-192.png" /> -->
+  </head>
 
-        <button id="btn-find" class="menu-card disabled" aria-label="Find the Animal (coming soon)" disabled>
-          <img src="assets/img/goat.png" alt="" aria-hidden="true">
-          <div>
-            <div class="title">Find the Animal</div>
-            <div class="subtitle">Coming soon — follow the clue and tap!</div>
-          </div>
-        </button>
+  <body class="route-home">
+    <!-- Back / up button (auto-hidden on Home) -->
+    <button id="btn-back" class="btn-back hidden" aria-label="Back to home">← Back</button>
 
-        <button id="btn-feed" class="menu-card disabled" aria-label="Feed the Animal (coming soon)" disabled>
-          <img src="assets/img/pig.png" alt="" aria-hidden="true">
-          <div>
-            <div class="title">Feed the Animal</div>
-            <div class="subtitle">Coming soon — pick the right yummy food.</div>
-          </div>
-        </button>
-      </div>
-    </div>
-  </section>
-
-  <!-- BACK BUTTON (inside modes) -->
-  <button id="btn-back" class="btn-back hidden" aria-label="Back to home">← Home</button>
-
-  <!-- APP: EXPLORE -->
-  <main id="app">
-    <section id="scene" class="scene hidden" aria-label="Farm scene with tappable animals" role="region"></section>
-
-    <!-- MATCH GAME -->
-    <section id="match" class="match hidden" aria-label="Guess the Sound game" role="region">
-      <div class="match-card">
-        <div class="prompt">
-          <span class="prompt-text">Which animal makes this sound?</span>
-          <button id="play-sound" class="btn primary" aria-label="Play the sound">▶ Play</button>
+    <!-- =========================
+         Home / Landing
+         ========================= -->
+    <section id="home" class="home" aria-label="Farm Friends start menu" role="region">
+      <div class="home-inner">
+        <div class="brand">
+          <!-- PNG logo (full opacity, sits above blended background) -->
+          <img src="assets/brand/logo.png" alt="Farm Friends logo" class="logo-img" />
         </div>
-        <div id="choices" class="choices" role="group" aria-label="Animal choices"></div>
-        <div id="result" class="result" role="status" aria-live="polite"></div>
+
+        <div class="menu" role="navigation" aria-label="Main menu">
+          <!-- Explore -->
+          <button id="btn-explore" class="menu-card" aria-label="Animal Sounds and Facts">
+            <img src="assets/img/horse.png" alt="" aria-hidden="true" />
+            <div>
+              <div class="title">Animal Sounds &amp; Facts</div>
+              <div class="subtitle">Tap an animal, hear its sound, learn fun bits!</div>
+            </div>
+          </button>
+
+          <!-- Guess the Sound -->
+          <button id="btn-match" class="menu-card" aria-label="Guess the Sound game">
+            <img src="assets/img/duck.png" alt="" aria-hidden="true" />
+            <div>
+              <div class="title">Guess the Sound!</div>
+              <div class="subtitle">Which animal made that noise?</div>
+            </div>
+          </button>
+
+          <!-- Coming soon stubs -->
+          <button id="btn-story" class="menu-card disabled" aria-label="Story Time (coming soon)" disabled>
+            <img src="assets/img/sheep.png" alt="" aria-hidden="true" />
+            <div>
+              <div class="title">Story Time</div>
+              <div class="subtitle">Coming soon — cosy farm tales.</div>
+            </div>
+          </button>
+
+          <button id="btn-find" class="menu-card disabled" aria-label="Find the Animal (coming soon)" disabled>
+            <img src="assets/img/goat.png" alt="" aria-hidden="true" />
+            <div>
+              <div class="title">Find the Animal</div>
+              <div class="subtitle">Coming soon — follow the clue and tap!</div>
+            </div>
+          </button>
+
+          <button id="btn-feed" class="menu-card disabled" aria-label="Feed the Animal (coming soon)" disabled>
+            <img src="assets/img/pig.png" alt="" aria-hidden="true" />
+            <div>
+              <div class="title">Feed the Animal</div>
+              <div class="subtitle">Coming soon — pick the right yummy food.</div>
+            </div>
+          </button>
+        </div>
       </div>
     </section>
-  </main>
 
-  <!-- MODAL: Animal Card -->
-  <div id="overlay" class="overlay hidden" aria-hidden="true">
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <button id="modal-close" class="modal-close" aria-label="Close">×</button>
-      <div class="modal-body">
-        <div class="modal-image-wrap">
-          <img id="modal-img" alt="" />
-          <button id="modal-play" class="btn primary modal-play" aria-label="Play animal sound">▶ Play sound</button>
+    <!-- =========================
+         Explore (grid of animals)
+         ========================= -->
+    <main id="app" role="main" class="hidden">
+      <section
+        id="scene"
+        class="scene hidden"
+        aria-label="Farm scene with tappable animals"
+        role="region">
+        <!-- Cards are rendered by app.js from ANIMALS -->
+      </section>
+
+      <!-- =========================
+           Guess the Sound
+           ========================= -->
+      <section id="match" class="match hidden" aria-label="Guess the Sound game" role="region">
+        <div class="match-card">
+          <div class="prompt">
+            <span class="prompt-text">Which animal makes this sound?</span>
+            <button id="play-sound" class="btn btn-hero btn-lg" aria-label="Replay the sound">
+              <span class="btn-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+                  <path d="M8 5v14l11-7z"></path>
+                </svg>
+              </span>
+              <span class="btn-label">Replay sound</span>
+            </button>
+          </div>
+
+          <div id="choices" class="choices" role="group" aria-label="Animal choices">
+            <!-- Three choices are rendered each round by app.js -->
+          </div>
+
+          <div id="result" class="result" role="status" aria-live="polite"></div>
         </div>
-        <div class="modal-content">
-          <h2 id="modal-title"></h2>
-          <dl class="facts">
-            <div><dt>Animal type</dt><dd id="fact-type"></dd></div>
-            <div><dt>Habitat</dt><dd id="fact-habitat"></dd></div>
-            <div><dt>What it likes to eat</dt><dd id="fact-diet"></dd></div>
-            <div><dt>Where it lives</dt><dd id="fact-home"></dd></div>
-            <div><dt>Fun fact</dt><dd id="fact-fun"></dd></div>
-          </dl>
+      </section>
+    </main>
+
+    <!-- =========================
+         Modal (Explore info card)
+         ========================= -->
+    <div id="overlay" class="overlay hidden" aria-hidden="true">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <button id="modal-close" class="modal-close" aria-label="Close animal card">×</button>
+
+        <div class="modal-body">
+          <div class="modal-image-wrap">
+            <img id="modal-img" src="" alt="" />
+            <button id="modal-play" class="btn btn-hero btn-lg" aria-label="Play this animal's sound">
+              <span class="btn-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+                  <path d="M8 5v14l11-7z"></path>
+                </svg>
+              </span>
+              <span class="btn-label">Play sound</span>
+            </button>
+          </div>
+
+          <div class="modal-content">
+            <h2 id="modal-title">Animal</h2>
+            <dl class="facts">
+              <dt>Animal type</dt>
+              <dd id="fact-type"></dd>
+
+              <dt>Habitat</dt>
+              <dd id="fact-habitat"></dd>
+
+              <dt>What it likes to eat</dt>
+              <dd id="fact-diet"></dd>
+
+              <dt>Where it lives</dt>
+              <dd id="fact-home"></dd>
+
+              <dt>Fun fact</dt>
+              <dd id="fact-fun"></dd>
+            </dl>
+          </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <script src="animals.js"></script>
-  <script src="app.js"></script>
-  <script>
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js').catch(console.error);
-      });
-    }
-  </script>
-</body>
+    <!-- =========================
+         Scripts (order matters)
+         ========================= -->
+    <script src="animals.js"></script>
+    <script src="app.js"></script>
+
+    <!-- PWA registration (optional but recommended) -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
 </html>
