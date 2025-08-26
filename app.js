@@ -1,7 +1,7 @@
-/* Farm Friends — v0.2.1-alpha
-   Home screen, exclusive audio, puff/spark effects,
-   polished Match auto-advance + themed replay button,
-   modal open/close audio control + closing animation
+/* Farm Friends — v0.2.2-alpha
+   Match: no auto-cycling; advance only after a correct pick,
+   wait until audio finishes before swapping; friendly explanations.
+   Explore modal: still auto-plays on open; stops on close.
 */
 (() => {
   const $ = (sel, parent = document) => parent.querySelector(sel);
@@ -17,12 +17,12 @@
   const btnMatch = $('#btn-match');
 
   // Match controls
-  const playSoundBtn = $('#play-sound'); // themed "Replay" button
+  const playSoundBtn = $('#play-sound'); // themed "Replay" button from previous version
   const choicesEl = $('#choices');
   const resultEl = $('#result');
   const matchCard = $('.match-card', matchEl);
 
-  // Modal elements
+  // Modal elements (Explore)
   const overlay = $('#overlay');
   const modalClose = $('#modal-close');
   const modalImg = $('#modal-img');
@@ -41,10 +41,11 @@
   let lastFocused = null;
   let currentId = null;           // which animal is currently playing
   let fadeInterval = null;
-  let roundActive = false;        // prevent double-advance in Match
-  let answerEndedHandler = null;  // to clean up listeners
 
-  // ========== Exclusive audio helpers ==========
+  // ========== Helpers ==========
+  const getAnimal = (id) => ANIMALS.find(a => a.id === id);
+
+  // ========== Exclusive audio ==========
   function createAudio(src) {
     const a = new Audio(src);
     a.preload = 'auto';
@@ -81,7 +82,7 @@
     const a = audioMap.get(currentId);
     if (!a) { currentId = null; return; }
     if (smooth) {
-      fade(a, a.volume ?? 1, 0, 160, () => { try { a.pause(); a.currentTime = 0; } catch {} });
+      fade(a, a.volume ?? 1, 0, 140, () => { try { a.pause(); a.currentTime = 0; } catch {} });
     } else {
       try { a.pause(); a.currentTime = 0; } catch {}
     }
@@ -92,7 +93,7 @@
     const next = audioMap.get(id);
     if (!next) return;
 
-    // If the same sound is requested, restart cleanly.
+    // Restart cleanly if same, or cross-fade if different.
     if (currentId === id) {
       stopCurrent(false);
     } else {
@@ -103,11 +104,11 @@
       next.currentTime = 0;
       next.volume = 0;
       currentId = id;
-      next.play().then(() => fade(next, 0, 1, 160)).catch(()=>{});
+      next.play().then(() => fade(next, 0, 1, 140)).catch(()=>{});
     } catch {}
   }
 
-  // ========== Fun UI effects ==========
+  // ========== Fun effects ==========
   function menuPuff(btn) {
     const puff = document.createElement('div');
     puff.className = 'menu-burst';
@@ -160,15 +161,14 @@
     setTimeout(() => burst.remove(), 700);
   }
 
-  // ========== Modal ==========
+  // ========== Modal (Explore) ==========
   function openModal(animal, triggerEl) {
-    // Make sure other mode sounds aren't playing
+    // Ensure no overlap from other modes
     stopCurrent(false);
 
     lastFocused = triggerEl || document.activeElement;
     document.body.classList.add('modal-open');
-    overlay.classList.remove('hidden');
-    overlay.classList.remove('closing'); // ensure not closing state
+    overlay.classList.remove('hidden', 'closing');
     overlay.setAttribute('aria-hidden', 'false');
 
     modalTitle.textContent = animal.name;
@@ -189,17 +189,14 @@
     // Auto-play when opened
     playAnimalSound(animal.id);
 
-    // Focus close
     modalClose.focus();
   }
 
   function closeModal() {
-    // Cut any playing audio immediately on close
+    // Stop immediately on close so it never leaks into other tiles
     stopCurrent(false);
 
-    // Animate out then hide
     overlay.classList.add('closing');
-    // After animation, hide
     setTimeout(() => {
       overlay.classList.add('hidden');
       overlay.setAttribute('aria-hidden', 'true');
@@ -226,13 +223,11 @@
       card.appendChild(img); card.appendChild(name);
 
       card.addEventListener('click', () => {
-        // visual feedback
         card.classList.add('selected');
         card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
         sparkBurst(card);
         setTimeout(() => card.classList.remove('selected'), 550);
 
-        // open and play
         openModal(a, card);
       });
 
@@ -240,7 +235,7 @@
     });
   }
 
-  // ========== Match Game (audio-only guessing) ==========
+  // ========== Match Game (audio-only; child must choose) ==========
   function randInt(n) { return Math.floor(Math.random() * n); }
   function sample(array, count) {
     const copy = array.slice(); const out = [];
@@ -256,32 +251,19 @@
     return copy;
   }
 
-  function cleanupAnswerEnded() {
-    if (!currentRound) return;
-    const audio = audioMap.get(currentRound.answerId);
-    if (audio && answerEndedHandler) {
-      audio.removeEventListener('ended', answerEndedHandler);
-    }
-    answerEndedHandler = null;
-  }
-
   function animateMatchSwap(cb) {
-    // fade / scale the card, then call cb(), then fade back in
     matchCard.classList.add('swap-out');
     setTimeout(() => {
       if (cb) cb();
       matchCard.classList.remove('swap-out');
       matchCard.classList.add('swap-in');
-      // remove the swap-in after it finishes
       setTimeout(() => matchCard.classList.remove('swap-in'), 220);
     }, 220);
   }
 
   function newRound() {
-    // Stop any audio and old listeners
+    // Reset audio; no auto-advance from audio end anymore
     stopCurrent(false);
-    cleanupAnswerEnded();
-    roundActive = true;
 
     const choicesCount = Math.min(3, ANIMALS.length);
     const animals = sample(ANIMALS, choicesCount);
@@ -291,22 +273,11 @@
 
     renderChoices(animals);
 
-    // Auto-play the prompt once; button shows Replay
+    // Auto-play the prompt once; button shows “Replay”
     setTimeout(() => {
       stopCurrent(false);
       playAnimalSound(answer.id);
       playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-      // When the prompt audio ends and the child hasn't answered, auto-advance after a beat
-      const audio = audioMap.get(answer.id);
-      answerEndedHandler = () => {
-        if (!roundActive) return;
-        // brief pause for anticipation, then swap
-        setTimeout(() => {
-          if (!roundActive) return;
-          animateMatchSwap(() => newRound());
-        }, 600);
-      };
-      audio.addEventListener('ended', answerEndedHandler, { once: true });
     }, 200);
   }
 
@@ -325,23 +296,50 @@
       btn.appendChild(img);
 
       btn.addEventListener('click', () => {
-        // Child answered; prevent the ended() auto-advance for this round
-        roundActive = false;
-        cleanupAnswerEnded();
+        const answer = getAnimal(currentRound.answerId);
+        const picked = a;
 
-        // Stop any current audio before feedback
-        stopCurrent(false);
+        // If the prompt is still playing and the pick is correct, let it finish.
+        // If it's incorrect, we stop and replay the prompt after feedback.
+        const promptStillPlaying = currentId === answer.id;
 
-        const correct = a.id === currentRound.answerId;
-        if (correct) {
+        if (picked.id === answer.id) {
           btn.classList.add('correct');
-          resultEl.textContent = 'Great job!';
-          playAnimalSound(a.id);
-          // cheerful, quick transition to next round
-          setTimeout(() => animateMatchSwap(() => newRound()), 900);
+          resultEl.textContent = '';
+          resultEl.innerHTML = `Yes! That was the <b>${answer.name}</b>. ${answer.fun}`;
+
+          // If the correct sound isn't currently playing, play it now; then advance after it ends.
+          if (!promptStillPlaying) {
+            stopCurrent(false);
+            const ansAudio = audioMap.get(answer.id);
+            // Play correct sound and wait for it to finish before moving on
+            ansAudio.currentTime = 0;
+            currentId = answer.id;
+            ansAudio.play().catch(()=>{});
+            ansAudio.onended = () => animateMatchSwap(() => newRound());
+          } else {
+            // Prompt is the correct sound and is already playing; wait for it to end first
+            const ansAudio = audioMap.get(answer.id);
+            if (ansAudio) {
+              const handler = () => {
+                ansAudio.removeEventListener('ended', handler);
+                animateMatchSwap(() => newRound());
+              };
+              ansAudio.addEventListener('ended', handler, { once: true });
+            } else {
+              // Fallback: small delay then advance
+              setTimeout(() => animateMatchSwap(() => newRound()), 600);
+            }
+          }
         } else {
           btn.classList.add('incorrect');
-          resultEl.textContent = 'Try again!';
+          // Friendly explanation using facts
+          resultEl.innerHTML = `Nice try! You tapped the <b>${picked.name}</b> — ${picked.fun} <br>Listen again and find the <b>${answer.name}</b>!`;
+          // Stop any audio, replay the prompt after a short beat
+          setTimeout(() => {
+            stopCurrent(false);
+            playAnimalSound(answer.id);
+          }, 400);
         }
       });
 
@@ -351,7 +349,6 @@
 
   function playCurrentPrompt() {
     if (!currentRound) return;
-    // ensure exclusivity: stop anything before replay
     stopCurrent(false);
     playAnimalSound(currentRound.answerId);
     playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
@@ -369,11 +366,10 @@
     `;
   }
 
-  // ========== Navigation (Home ↔ Explore / Match) ==========
+  // ========== Navigation ==========
   function showHome() {
     closeModal();
     stopCurrent(false);
-    cleanupAnswerEnded();
     homeEl.classList.remove('hidden');
     sceneEl.classList.add('hidden');
     matchEl.classList.add('hidden');
@@ -381,7 +377,6 @@
   }
   function showExplore() {
     stopCurrent(false);
-    cleanupAnswerEnded();
     homeEl.classList.add('hidden');
     matchEl.classList.add('hidden');
     sceneEl.classList.remove('hidden');
@@ -417,7 +412,7 @@
     btnBack.addEventListener('click', showHome);
 
     // Match handlers
-    playSoundBtn.classList.add('btn', 'btn-hero'); // theme it
+    playSoundBtn.classList.add('btn', 'btn-hero'); // themed
     playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     playSoundBtn.addEventListener('click', playCurrentPrompt);
 
