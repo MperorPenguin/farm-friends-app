@@ -1,0 +1,27 @@
+// Animal catalogue with richer details for the modal card
+const ANIMALS = [
+  { id: "cow", name: "Cow", image: "assets/img/cow.png", sound: "assets/audio/cow.mp3", color: "#ffe5e0",
+    type: "Mammal (Bovine)", habitat: "Grassy fields and barns on farms", diet: "Grass, hay, silage",
+    home: "On farms around the world, often in pastures", fun: "Cows can recognize their friends and have best buddies!" },
+  { id: "pig", name: "Pig", image: "assets/img/pig.png", sound: "assets/audio/pig.mp3", color: "#fde2f3",
+    type: "Mammal (Porcine)", habitat: "Pens and muddy yards", diet: "Grains, veggies, and specially mixed feed",
+    home: "On farms in pens or barns with cozy straw", fun: "Pigs love mud—it keeps them cool like sunscreen!" },
+  { id: "chicken", name: "Chicken", image: "assets/img/chicken.png", sound: "assets/audio/chicken.mp3", color: "#fff3cd",
+    type: "Bird (Poultry)", habitat: "Coops and farmyards", diet: "Seeds, grains, bugs",
+    home: "In a chicken coop with nesting boxes", fun: "Chickens take dust baths to keep clean—so silly!" },
+  { id: "duck", name: "Duck", image: "assets/img/duck.png", sound: "assets/audio/duck.mp3", color: "#d1f7ff",
+    type: "Bird (Waterfowl)", habitat: "Ponds and grassy banks", diet: "Plants, seeds, small insects",
+    home: "On farms with a pond or water tub", fun: "Duck feathers are super waterproof—splish splash!" },
+  { id: "sheep", name: "Sheep", image: "assets/img/sheep.png", sound: "assets/audio/sheep.mp3", color: "#e8f5e9",
+    type: "Mammal (Ovine)", habitat: "Pastures and hills", diet: "Grass and clover",
+    home: "On farms in fields with cozy shelters", fun: "Sheep grow woolly coats that make warm jumpers." },
+  { id: "goat", name: "Goat", image: "assets/img/goat.png", sound: "assets/audio/goat.mp3", color: "#f0f4c3",
+    type: "Mammal (Caprine)", habitat: "Rocky yards and pastures", diet: "Grass, leaves, shrubs",
+    home: "On farms with climbing frames and barns", fun: "Goats are great climbers and very curious!" },
+  { id: "horse", name: "Horse", image: "assets/img/horse.png", sound: "assets/audio/horse.mp3", color: "#e0f7fa",
+    type: "Mammal (Equine)", habitat: "Stables and paddocks", diet: "Hay, grass, oats",
+    home: "On farms in stables with big fields", fun: "Horses sleep standing up using special leg locks!" },
+  { id: "donkey", name: "Donkey", image: "assets/img/donkey.png", sound: "assets/audio/donkey.mp3", color: "#f9e4d4",
+    type: "Mammal (Equine)", habitat: "Dry fields and farmyards", diet: "Grass, hay, straw",
+    home: "On farms in stables or shelters", fun: "Donkeys are calm, brave helpers with loud hee-haws!" }
+];
