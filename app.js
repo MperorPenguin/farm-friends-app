@@ -1,41 +1,41 @@
-/* Farm Friends — v0.2.3-alpha
-   Guess the Sound:
-   - No auto-cycling; advance only when the child taps Next on the Correct popup.
-   - Friendly, themed popups for Correct/Incorrect with explanations.
-   - Replay always stops any current audio first.
-   Explore modal:
-   - Audio starts on open, stops on close (unchanged).
+/* Farm Friends — v0.2.4-alpha (stability tidy)
+   - Fixes template string typo that broke navigation.
+   - Adds tiny guards and cleanup (no feature changes).
+   Baseline features kept from v0.2.3-alpha:
+   * Guess the Sound! with Replay, themed popups (Correct/Incorrect) + Next button
+   * No auto-cycling; advance only when child taps Next
+   * Explore modal auto-plays on open; stops on close
 */
 (() => {
-  const $ = (sel, parent = document) => parent.querySelector(sel);
+  const $ = (sel, parent = document) => parent?.querySelector(sel);
 
   // Elements
-  const homeEl = $('#home');
-  const sceneEl = $('#scene');
-  const matchEl = $('#match');
-  const btnBack = $('#btn-back');
+  const homeEl   = $('#home');
+  const sceneEl  = $('#scene');
+  const matchEl  = $('#match');
+  const btnBack  = $('#btn-back');
 
   // Home buttons
   const btnExplore = $('#btn-explore');
-  const btnMatch = $('#btn-match');
+  const btnMatch   = $('#btn-match');
 
   // Match controls
   const playSoundBtn = $('#play-sound'); // Replay button
-  const choicesEl = $('#choices');
-  const resultEl = $('#result');
-  const matchCard = $('.match-card', matchEl);
+  const choicesEl    = $('#choices');
+  const resultEl     = $('#result');
+  const matchCard    = $('.match-card', matchEl);
 
   // Modal elements (Explore)
-  const overlay = $('#overlay');
+  const overlay    = $('#overlay');
   const modalClose = $('#modal-close');
-  const modalImg = $('#modal-img');
-  const modalPlay = $('#modal-play');
+  const modalImg   = $('#modal-img');
+  const modalPlay  = $('#modal-play');
   const modalTitle = $('#modal-title');
-  const factType = $('#fact-type');
-  const factHabitat = $('#fact-habitat');
-  const factDiet = $('#fact-diet');
-  const factHome = $('#fact-home');
-  const factFun = $('#fact-fun');
+  const factType   = $('#fact-type');
+  const factHabitat= $('#fact-habitat');
+  const factDiet   = $('#fact-diet');
+  const factHome   = $('#fact-home');
+  const factFun    = $('#fact-fun');
 
   // Feedback popup (created once and reused)
   let fbOverlay;
@@ -50,7 +50,7 @@
 
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
 
-  // ========== Audio (exclusive with quick fade) ==========
+  // ===== Audio (exclusive with quick fade) =====
   function createAudio(src) {
     const a = new Audio(src);
     a.preload = 'auto';
@@ -59,16 +59,16 @@
     return a;
   }
   function preloadAudio() {
-    ANIMALS.forEach(animal => {
-      audioMap.set(animal.id, createAudio(animal.sound));
+    (ANIMALS || []).forEach(animal => {
+      if (!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound));
     });
   }
   function fade(audio, from, to, ms, done) {
-    if (!audio) return done && done();
+    if (!audio) { if (done) done(); return; }
     if (fadeInterval) clearInterval(fadeInterval);
     const steps = 10;
     const step = (to - from) / steps;
-    const interval = ms / steps;
+    const interval = Math.max(10, ms / steps);
     let i = 0;
     audio.volume = from;
     fadeInterval = setInterval(() => {
@@ -109,8 +109,9 @@
     } catch {}
   }
 
-  // ========== Fun effects ==========
+  // ===== Visual flourishes =====
   function menuPuff(btn) {
+    if (!btn) return;
     const puff = document.createElement('div');
     puff.className = 'menu-burst';
     const rect = btn.getBoundingClientRect();
@@ -136,6 +137,7 @@
     setTimeout(() => puff.remove(), 720);
   }
   function sparkBurst(card) {
+    if (!card) return;
     const burst = document.createElement('div');
     burst.className = 'burst';
     const rect = card.getBoundingClientRect();
@@ -161,35 +163,35 @@
     setTimeout(() => burst.remove(), 700);
   }
 
-  // ========== Explore modal ==========
+  // ===== Explore modal =====
   function openModal(animal, triggerEl) {
+    if (!animal) return;
     stopCurrent(false);
 
     lastFocused = triggerEl || document.activeElement;
     document.body.classList.add('modal-open');
-    overlay.classList.remove('hidden', 'closing');
-    overlay.setAttribute('aria-hidden', 'false');
+    overlay?.classList.remove('hidden', 'closing');
+    overlay?.setAttribute('aria-hidden', 'false');
 
-    modalTitle.textContent = animal.name;
-    modalImg.src = animal.image;
-    modalImg.alt = animal.name;
+    if (modalTitle) modalTitle.textContent = animal.name || '';
+    if (modalImg) { modalImg.src = animal.image || ''; modalImg.alt = animal.name || ''; }
 
-    factType.textContent = animal.type || '';
-    factHabitat.textContent = animal.habitat || '';
-    factDiet.textContent = animal.diet || '';
-    factHome.textContent = animal.home || '';
-    factFun.textContent = animal.fun || '';
+    if (factType)    factType.textContent = animal.type || '';
+    if (factHabitat) factHabitat.textContent = animal.habitat || '';
+    if (factDiet)    factDiet.textContent = animal.diet || '';
+    if (factHome)    factHome.textContent = animal.home || '';
+    if (factFun)     factFun.textContent = animal.fun || '';
 
-    modalPlay.onclick = () => {
-      stopCurrent(false);
-      playAnimalSound(animal.id);
-    };
+    if (modalPlay) {
+      modalPlay.onclick = () => { stopCurrent(false); playAnimalSound(animal.id); };
+    }
 
     playAnimalSound(animal.id);
-    modalClose.focus();
+    modalClose?.focus();
   }
   function closeModal() {
     stopCurrent(false);
+    if (!overlay) return;
     overlay.classList.add('closing');
     setTimeout(() => {
       overlay.classList.add('hidden');
@@ -199,10 +201,11 @@
     }, 220);
   }
 
-  // ========== Explore scene ==========
+  // ===== Explore scene =====
   function renderScene() {
+    if (!sceneEl) return;
     sceneEl.innerHTML = '';
-    ANIMALS.forEach(a => {
+    (ANIMALS || []).forEach(a => {
       const card = document.createElement('button');
       card.className = 'animal';
       card.style.background = a.color || 'var(--card)';
@@ -228,7 +231,7 @@
     });
   }
 
-  // ========== Feedback popup for Match ==========
+  // ===== Feedback popup for Match =====
   function ensureFeedbackOverlay() {
     if (fbOverlay) return fbOverlay;
     fbOverlay = document.createElement('div');
@@ -247,51 +250,49 @@
     document.body.appendChild(fbOverlay);
     return fbOverlay;
   }
-
   function showFeedback({ correct, title, message, primaryLabel, onPrimary, secondaryLabel, onSecondary }) {
     const el = ensureFeedbackOverlay();
     const titleEl = $('#fb-title', el);
-    const msgEl = $('#fb-message', el);
+    const msgEl   = $('#fb-message', el);
     const primary = $('#fb-primary', el);
     const secondary = $('#fb-secondary', el);
     const card = $('.feedback-card', el);
 
-    // Theme
     el.classList.remove('hidden');
     el.classList.toggle('correct', !!correct);
     el.classList.toggle('incorrect', !correct);
-    card.classList.remove('out');
-    // content
-    titleEl.textContent = title || (correct ? 'Well done!' : 'Nice try!');
-    msgEl.innerHTML = message || '';
-    primary.textContent = primaryLabel || (correct ? 'Next' : 'OK');
-    primary.onclick = () => { onPrimary && onPrimary(); hideFeedback(); };
+    card?.classList.remove('out');
 
-    if (secondaryLabel) {
+    if (titleEl)   titleEl.textContent = title || (correct ? 'Well done!' : 'Nice try!');
+    if (msgEl)     msgEl.innerHTML = message || '';
+    if (primary) {
+      primary.textContent = primaryLabel || (correct ? 'Next' : 'OK');
+      primary.onclick = () => { if (onPrimary) onPrimary(); hideFeedback(); };
+    }
+
+    if (secondaryLabel && secondary) {
       secondary.classList.remove('hidden');
       secondary.textContent = secondaryLabel;
-      secondary.onclick = () => { onSecondary && onSecondary(); hideFeedback(false); }; // keep feedback hidden after action
-    } else {
+      secondary.onclick = () => { if (onSecondary) onSecondary(); hideFeedback(false); };
+    } else if (secondary) {
       secondary.classList.add('hidden');
       secondary.onclick = null;
     }
 
-    // focus
-    setTimeout(() => primary.focus(), 10);
+    setTimeout(() => primary?.focus(), 10);
   }
-
   function hideFeedback(animateOut = true) {
     if (!fbOverlay) return;
     const card = $('.feedback-card', fbOverlay);
     if (animateOut) {
-      card.classList.add('out');
+      card?.classList.add('out');
       setTimeout(() => fbOverlay.classList.add('hidden'), 200);
     } else {
       fbOverlay.classList.add('hidden');
     }
   }
 
-  // ========== Match Game (audio-only; advances via Next) ==========
+  // ===== Match (audio-only; advance via Next) =====
   function randInt(n) { return Math.floor(Math.random() * n); }
   function sample(array, count) {
     const copy = array.slice(); const out = [];
@@ -306,8 +307,8 @@
     }
     return copy;
   }
-
   function animateMatchSwap(cb) {
+    if (!matchCard) { if (cb) cb(); return; }
     matchCard.classList.add('swap-out');
     setTimeout(() => {
       if (cb) cb();
@@ -316,27 +317,26 @@
       setTimeout(() => matchCard.classList.remove('swap-in'), 220);
     }, 220);
   }
-
   function newRound() {
     stopCurrent(false);
-    resultEl.textContent = '';
+    if (resultEl) resultEl.textContent = '';
 
-    const choicesCount = Math.min(3, ANIMALS.length);
-    const animals = sample(ANIMALS, choicesCount);
-    const answer = animals[randInt(animals.length)];
-    currentRound = { answerId: answer.id, choiceIds: animals.map(a => a.id) };
+    const choicesCount = Math.min(3, (ANIMALS || []).length);
+    const pool = sample(ANIMALS, choicesCount);
+    const answer = pool[randInt(pool.length)];
+    currentRound = { answerId: answer.id, choiceIds: pool.map(a => a.id) };
 
-    renderChoices(animals);
+    renderChoices(pool);
 
     // Auto-play prompt once
     setTimeout(() => {
       stopCurrent(false);
       playAnimalSound(answer.id);
-      playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+      if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     }, 200);
   }
-
   function renderChoices(animals) {
+    if (!choicesEl) return;
     choicesEl.innerHTML = '';
     shuffle(animals).forEach(a => {
       const btn = document.createElement('button');
@@ -349,33 +349,30 @@
       btn.appendChild(img);
 
       btn.addEventListener('click', () => {
-        const answer = getAnimal(currentRound.answerId);
+        const answer = getAnimal(currentRound?.answerId);
         const picked = a;
+        if (!answer) return;
 
-        // Stop current audio before giving spoken/visual feedback
+        // Stop current audio before feedback
         stopCurrent(false);
 
         if (picked.id === answer.id) {
           btn.classList.add('correct');
-          // Play the correct sound in celebration, but let the child choose when to go Next.
+          // Play the correct sound (celebration), child taps Next to continue
           playAnimalSound(answer.id);
 
-          // Friendly explanation for why it's right (uses fun fact)
           const msg = `You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
           showFeedback({
             correct: true,
             title: 'Well done!',
             message: msg,
             primaryLabel: 'Next',
-            onPrimary: () => {
-              stopCurrent(false);
-              animateMatchSwap(() => newRound());
-            }
+            onPrimary: () => { stopCurrent(false); animateMatchSwap(() => newRound()); }
           });
         } else {
           btn.classList.add('incorrect');
-          // Explain the difference and offer a replay
-          const msg = `That was the <b>${picked.name</b>} — ${picked.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
+          // FIXED TEMPLATE STRING HERE (this typo previously broke the app)
+          const msg = `That was the <b>${picked.name}</b> — ${picked.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
           showFeedback({
             correct: false,
             title: 'Nice try!',
@@ -383,10 +380,7 @@
             primaryLabel: 'Keep guessing',
             onPrimary: () => { /* just close popup */ },
             secondaryLabel: 'Listen again',
-            onSecondary: () => {
-              stopCurrent(false);
-              playAnimalSound(answer.id);
-            }
+            onSecondary: () => { stopCurrent(false); playAnimalSound(answer.id); }
           });
         }
       });
@@ -395,13 +389,7 @@
     });
   }
 
-  function playCurrentPrompt() {
-    if (!currentRound) return;
-    stopCurrent(false);
-    playAnimalSound(currentRound.answerId);
-    playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-  }
-
+  // Themed play/replay button content (SVG + label)
   function btnPlayHTML(label = 'Play') {
     return `
       <span class="btn-ico" aria-hidden="true">
@@ -412,59 +400,71 @@
       <span class="btn-label">${label}</span>
     `;
   }
+  function playCurrentPrompt() {
+    if (!currentRound) return;
+    stopCurrent(false);
+    playAnimalSound(currentRound.answerId);
+    if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+  }
 
-  // ========== Navigation ==========
+  // ===== Navigation =====
   function showHome() {
     closeModal();
     stopCurrent(false);
-    homeEl.classList.remove('hidden');
-    sceneEl.classList.add('hidden');
-    matchEl.classList.add('hidden');
-    btnBack.classList.add('hidden');
+    homeEl?.classList.remove('hidden');
+    sceneEl?.classList.add('hidden');
+    matchEl?.classList.add('hidden');
+    btnBack?.classList.add('hidden');
   }
   function showExplore() {
     stopCurrent(false);
-    homeEl.classList.add('hidden');
-    matchEl.classList.add('hidden');
-    sceneEl.classList.remove('hidden');
-    btnBack.classList.remove('hidden');
+    homeEl?.classList.add('hidden');
+    matchEl?.classList.add('hidden');
+    sceneEl?.classList.remove('hidden');
+    btnBack?.classList.remove('hidden');
   }
   function showMatch() {
     stopCurrent(false);
-    homeEl.classList.add('hidden');
-    sceneEl.classList.add('hidden');
-    matchEl.classList.remove('hidden');
-    btnBack.classList.remove('hidden');
-    playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+    homeEl?.classList.add('hidden');
+    sceneEl?.classList.add('hidden');
+    matchEl?.classList.remove('hidden');
+    btnBack?.classList.remove('hidden');
+    if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     newRound();
   }
 
-  // ========== Init ==========
+  // ===== Init =====
   function init() {
+    if (!homeEl || !sceneEl || !matchEl) return; // basic DOM presence check
+
     preloadAudio();
     renderScene();
     showHome();
 
     // Home buttons
-    btnExplore.addEventListener('click', () => { menuPuff(btnExplore); setTimeout(showExplore, 150); });
-    btnMatch.addEventListener('click', () => { menuPuff(btnMatch); setTimeout(showMatch, 150); });
+    btnExplore?.addEventListener('click', () => { menuPuff(btnExplore); setTimeout(showExplore, 150); });
+    btnMatch?.addEventListener('click',   () => { menuPuff(btnMatch);   setTimeout(showMatch, 150); });
 
     // Back
-    btnBack.addEventListener('click', showHome);
+    btnBack?.addEventListener('click', showHome);
 
     // Match
-    playSoundBtn.classList.add('btn', 'btn-hero', 'btn-lg');
-    playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-    playSoundBtn.addEventListener('click', playCurrentPrompt);
+    if (playSoundBtn) {
+      playSoundBtn.classList.add('btn', 'btn-hero', 'btn-lg');
+      playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+      playSoundBtn.addEventListener('click', playCurrentPrompt);
+    }
 
     // Modal close / interactions
-    modalClose.addEventListener('click', closeModal);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal(); });
+    modalClose?.addEventListener('click', closeModal);
+    overlay?.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
 
     // Modal play theme
-    modalPlay.classList.add('btn', 'btn-hero', 'btn-lg');
-    modalPlay.innerHTML = btnPlayHTML('Play sound');
+    if (modalPlay) {
+      modalPlay.classList.add('btn', 'btn-hero', 'btn-lg');
+      modalPlay.innerHTML = btnPlayHTML('Play sound');
+    }
 
     // iOS audio unlock
     window.addEventListener('touchstart', () => {
