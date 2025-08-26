@@ -1,5 +1,5 @@
 /* Service worker for offline caching (v6 landing update) */
-const CACHE_NAME = 'farm-friends-v6';
+const CACHE_NAME = 'farm-friends-v7'; // was v6
 const CORE_ASSETS = [
   './',
   './index.html',
