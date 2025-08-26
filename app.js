@@ -1,7 +1,10 @@
-/* Farm Friends — v0.2.2-alpha
-   Match: no auto-cycling; advance only after a correct pick,
-   wait until audio finishes before swapping; friendly explanations.
-   Explore modal: still auto-plays on open; stops on close.
+/* Farm Friends — v0.2.3-alpha
+   Guess the Sound:
+   - No auto-cycling; advance only when the child taps Next on the Correct popup.
+   - Friendly, themed popups for Correct/Incorrect with explanations.
+   - Replay always stops any current audio first.
+   Explore modal:
+   - Audio starts on open, stops on close (unchanged).
 */
 (() => {
   const $ = (sel, parent = document) => parent.querySelector(sel);
@@ -17,7 +20,7 @@
   const btnMatch = $('#btn-match');
 
   // Match controls
-  const playSoundBtn = $('#play-sound'); // themed "Replay" button from previous version
+  const playSoundBtn = $('#play-sound'); // Replay button
   const choicesEl = $('#choices');
   const resultEl = $('#result');
   const matchCard = $('.match-card', matchEl);
@@ -34,6 +37,9 @@
   const factHome = $('#fact-home');
   const factFun = $('#fact-fun');
 
+  // Feedback popup (created once and reused)
+  let fbOverlay;
+
   // State
   let isMuted = false;
   const audioMap = new Map();     // id -> HTMLAudioElement
@@ -42,10 +48,9 @@
   let currentId = null;           // which animal is currently playing
   let fadeInterval = null;
 
-  // ========== Helpers ==========
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
 
-  // ========== Exclusive audio ==========
+  // ========== Audio (exclusive with quick fade) ==========
   function createAudio(src) {
     const a = new Audio(src);
     a.preload = 'auto';
@@ -68,8 +73,7 @@
     audio.volume = from;
     fadeInterval = setInterval(() => {
       i++;
-      const v = from + step * i;
-      audio.volume = Math.max(0, Math.min(1, v));
+      audio.volume = Math.max(0, Math.min(1, from + step * i));
       if (i >= steps) {
         clearInterval(fadeInterval);
         audio.volume = to;
@@ -94,11 +98,8 @@
     if (!next) return;
 
     // Restart cleanly if same, or cross-fade if different.
-    if (currentId === id) {
-      stopCurrent(false);
-    } else {
-      stopCurrent(true);
-    }
+    if (currentId === id) stopCurrent(false);
+    else stopCurrent(true);
 
     try {
       next.currentTime = 0;
@@ -134,7 +135,6 @@
     btn.appendChild(puff);
     setTimeout(() => puff.remove(), 720);
   }
-
   function sparkBurst(card) {
     const burst = document.createElement('div');
     burst.className = 'burst';
@@ -161,9 +161,8 @@
     setTimeout(() => burst.remove(), 700);
   }
 
-  // ========== Modal (Explore) ==========
+  // ========== Explore modal ==========
   function openModal(animal, triggerEl) {
-    // Ensure no overlap from other modes
     stopCurrent(false);
 
     lastFocused = triggerEl || document.activeElement;
@@ -186,16 +185,11 @@
       playAnimalSound(animal.id);
     };
 
-    // Auto-play when opened
     playAnimalSound(animal.id);
-
     modalClose.focus();
   }
-
   function closeModal() {
-    // Stop immediately on close so it never leaks into other tiles
     stopCurrent(false);
-
     overlay.classList.add('closing');
     setTimeout(() => {
       overlay.classList.add('hidden');
@@ -205,7 +199,7 @@
     }, 220);
   }
 
-  // ========== Explore (scene) ==========
+  // ========== Explore scene ==========
   function renderScene() {
     sceneEl.innerHTML = '';
     ANIMALS.forEach(a => {
@@ -227,7 +221,6 @@
         card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
         sparkBurst(card);
         setTimeout(() => card.classList.remove('selected'), 550);
-
         openModal(a, card);
       });
 
@@ -235,7 +228,70 @@
     });
   }
 
-  // ========== Match Game (audio-only; child must choose) ==========
+  // ========== Feedback popup for Match ==========
+  function ensureFeedbackOverlay() {
+    if (fbOverlay) return fbOverlay;
+    fbOverlay = document.createElement('div');
+    fbOverlay.className = 'feedback-overlay hidden';
+    fbOverlay.innerHTML = `
+      <div class="feedback-card" role="dialog" aria-modal="true" aria-live="assertive">
+        <div class="fb-icon" aria-hidden="true"></div>
+        <div class="fb-title" id="fb-title"></div>
+        <div class="fb-message" id="fb-message"></div>
+        <div class="fb-actions">
+          <button id="fb-secondary" class="btn btn-hero btn-lg hidden"></button>
+          <button id="fb-primary" class="btn btn-hero btn-lg"></button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(fbOverlay);
+    return fbOverlay;
+  }
+
+  function showFeedback({ correct, title, message, primaryLabel, onPrimary, secondaryLabel, onSecondary }) {
+    const el = ensureFeedbackOverlay();
+    const titleEl = $('#fb-title', el);
+    const msgEl = $('#fb-message', el);
+    const primary = $('#fb-primary', el);
+    const secondary = $('#fb-secondary', el);
+    const card = $('.feedback-card', el);
+
+    // Theme
+    el.classList.remove('hidden');
+    el.classList.toggle('correct', !!correct);
+    el.classList.toggle('incorrect', !correct);
+    card.classList.remove('out');
+    // content
+    titleEl.textContent = title || (correct ? 'Well done!' : 'Nice try!');
+    msgEl.innerHTML = message || '';
+    primary.textContent = primaryLabel || (correct ? 'Next' : 'OK');
+    primary.onclick = () => { onPrimary && onPrimary(); hideFeedback(); };
+
+    if (secondaryLabel) {
+      secondary.classList.remove('hidden');
+      secondary.textContent = secondaryLabel;
+      secondary.onclick = () => { onSecondary && onSecondary(); hideFeedback(false); }; // keep feedback hidden after action
+    } else {
+      secondary.classList.add('hidden');
+      secondary.onclick = null;
+    }
+
+    // focus
+    setTimeout(() => primary.focus(), 10);
+  }
+
+  function hideFeedback(animateOut = true) {
+    if (!fbOverlay) return;
+    const card = $('.feedback-card', fbOverlay);
+    if (animateOut) {
+      card.classList.add('out');
+      setTimeout(() => fbOverlay.classList.add('hidden'), 200);
+    } else {
+      fbOverlay.classList.add('hidden');
+    }
+  }
+
+  // ========== Match Game (audio-only; advances via Next) ==========
   function randInt(n) { return Math.floor(Math.random() * n); }
   function sample(array, count) {
     const copy = array.slice(); const out = [];
@@ -262,18 +318,17 @@
   }
 
   function newRound() {
-    // Reset audio; no auto-advance from audio end anymore
     stopCurrent(false);
+    resultEl.textContent = '';
 
     const choicesCount = Math.min(3, ANIMALS.length);
     const animals = sample(ANIMALS, choicesCount);
     const answer = animals[randInt(animals.length)];
     currentRound = { answerId: answer.id, choiceIds: animals.map(a => a.id) };
-    resultEl.textContent = '';
 
     renderChoices(animals);
 
-    // Auto-play the prompt once; button shows “Replay”
+    // Auto-play prompt once
     setTimeout(() => {
       stopCurrent(false);
       playAnimalSound(answer.id);
@@ -286,60 +341,53 @@
     shuffle(animals).forEach(a => {
       const btn = document.createElement('button');
       btn.className = 'choice';
-      btn.setAttribute('aria-label', a.name); // accessible only
+      btn.setAttribute('aria-label', a.name);
       btn.dataset.id = a.id;
 
       const img = document.createElement('img');
       img.src = a.image; img.alt = a.name;
-
-      // audio-only guessing: no text label
       btn.appendChild(img);
 
       btn.addEventListener('click', () => {
         const answer = getAnimal(currentRound.answerId);
         const picked = a;
 
-        // If the prompt is still playing and the pick is correct, let it finish.
-        // If it's incorrect, we stop and replay the prompt after feedback.
-        const promptStillPlaying = currentId === answer.id;
+        // Stop current audio before giving spoken/visual feedback
+        stopCurrent(false);
 
         if (picked.id === answer.id) {
           btn.classList.add('correct');
-          resultEl.textContent = '';
-          resultEl.innerHTML = `Yes! That was the <b>${answer.name}</b>. ${answer.fun}`;
+          // Play the correct sound in celebration, but let the child choose when to go Next.
+          playAnimalSound(answer.id);
 
-          // If the correct sound isn't currently playing, play it now; then advance after it ends.
-          if (!promptStillPlaying) {
-            stopCurrent(false);
-            const ansAudio = audioMap.get(answer.id);
-            // Play correct sound and wait for it to finish before moving on
-            ansAudio.currentTime = 0;
-            currentId = answer.id;
-            ansAudio.play().catch(()=>{});
-            ansAudio.onended = () => animateMatchSwap(() => newRound());
-          } else {
-            // Prompt is the correct sound and is already playing; wait for it to end first
-            const ansAudio = audioMap.get(answer.id);
-            if (ansAudio) {
-              const handler = () => {
-                ansAudio.removeEventListener('ended', handler);
-                animateMatchSwap(() => newRound());
-              };
-              ansAudio.addEventListener('ended', handler, { once: true });
-            } else {
-              // Fallback: small delay then advance
-              setTimeout(() => animateMatchSwap(() => newRound()), 600);
+          // Friendly explanation for why it's right (uses fun fact)
+          const msg = `You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
+          showFeedback({
+            correct: true,
+            title: 'Well done!',
+            message: msg,
+            primaryLabel: 'Next',
+            onPrimary: () => {
+              stopCurrent(false);
+              animateMatchSwap(() => newRound());
             }
-          }
+          });
         } else {
           btn.classList.add('incorrect');
-          // Friendly explanation using facts
-          resultEl.innerHTML = `Nice try! You tapped the <b>${picked.name}</b> — ${picked.fun} <br>Listen again and find the <b>${answer.name}</b>!`;
-          // Stop any audio, replay the prompt after a short beat
-          setTimeout(() => {
-            stopCurrent(false);
-            playAnimalSound(answer.id);
-          }, 400);
+          // Explain the difference and offer a replay
+          const msg = `That was the <b>${picked.name</b>} — ${picked.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
+          showFeedback({
+            correct: false,
+            title: 'Nice try!',
+            message: msg,
+            primaryLabel: 'Keep guessing',
+            onPrimary: () => { /* just close popup */ },
+            secondaryLabel: 'Listen again',
+            onSecondary: () => {
+              stopCurrent(false);
+              playAnimalSound(answer.id);
+            }
+          });
         }
       });
 
@@ -354,7 +402,6 @@
     playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
   }
 
-  // Themed play/replay button content (SVG + label)
   function btnPlayHTML(label = 'Play') {
     return `
       <span class="btn-ico" aria-hidden="true">
@@ -398,31 +445,25 @@
     renderScene();
     showHome();
 
-    // Home buttons with puff + nav
-    btnExplore.addEventListener('click', () => {
-      menuPuff(btnExplore);
-      setTimeout(showExplore, 150);
-    });
-    btnMatch.addEventListener('click', () => {
-      menuPuff(btnMatch);
-      setTimeout(showMatch, 150);
-    });
+    // Home buttons
+    btnExplore.addEventListener('click', () => { menuPuff(btnExplore); setTimeout(showExplore, 150); });
+    btnMatch.addEventListener('click', () => { menuPuff(btnMatch); setTimeout(showMatch, 150); });
 
-    // Back to home
+    // Back
     btnBack.addEventListener('click', showHome);
 
-    // Match handlers
-    playSoundBtn.classList.add('btn', 'btn-hero'); // themed
+    // Match
+    playSoundBtn.classList.add('btn', 'btn-hero', 'btn-lg');
     playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     playSoundBtn.addEventListener('click', playCurrentPrompt);
 
-    // Modal close events
+    // Modal close / interactions
     modalClose.addEventListener('click', closeModal);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal(); });
 
-    // Modal play button theme
-    modalPlay.classList.add('btn', 'btn-hero');
+    // Modal play theme
+    modalPlay.classList.add('btn', 'btn-hero', 'btn-lg');
     modalPlay.innerHTML = btnPlayHTML('Play sound');
 
     // iOS audio unlock
