@@ -1,10 +1,7 @@
-/* Farm Friends — v0.2.4-alpha (stability tidy)
-   - Fixes template string typo that broke navigation.
-   - Adds tiny guards and cleanup (no feature changes).
-   Baseline features kept from v0.2.3-alpha:
-   * Guess the Sound! with Replay, themed popups (Correct/Incorrect) + Next button
-   * No auto-cycling; advance only when child taps Next
-   * Explore modal auto-plays on open; stops on close
+/* Farm Friends — v0.2.5-alpha (reliability tidy)
+   - Robust navigation: handlers on DOMContentLoaded + window.load + delegated clicks
+   - Guards against overlay blocking home
+   - No feature changes vs v0.2.4
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -20,7 +17,7 @@
   const btnMatch   = $('#btn-match');
 
   // Match controls
-  const playSoundBtn = $('#play-sound'); // Replay button
+  const playSoundBtn = $('#play-sound');
   const choicesEl    = $('#choices');
   const resultEl     = $('#result');
   const matchCard    = $('.match-card', matchEl);
@@ -37,20 +34,21 @@
   const factHome   = $('#fact-home');
   const factFun    = $('#fact-fun');
 
-  // Feedback popup (created once and reused)
+  // Feedback overlay
   let fbOverlay;
 
   // State
-  let isMuted = false;
-  const audioMap = new Map();     // id -> HTMLAudioElement
-  let currentRound = null;        // { answerId, choiceIds: [] }
+  const audioMap = new Map();
+  let currentRound = null;
   let lastFocused = null;
-  let currentId = null;           // which animal is currently playing
+  let currentId = null;
   let fadeInterval = null;
 
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
 
-  // ===== Audio (exclusive with quick fade) =====
+  /* =======================
+     AUDIO (exclusive)
+  ======================= */
   function createAudio(src) {
     const a = new Audio(src);
     a.preload = 'auto';
@@ -64,62 +62,44 @@
     });
   }
   function fade(audio, from, to, ms, done) {
-    if (!audio) { if (done) done(); return; }
+    if (!audio) { done && done(); return; }
     if (fadeInterval) clearInterval(fadeInterval);
-    const steps = 10;
-    const step = (to - from) / steps;
-    const interval = Math.max(10, ms / steps);
-    let i = 0;
-    audio.volume = from;
+    const steps = 10, step = (to - from) / steps, interval = Math.max(10, ms / steps);
+    let i = 0; audio.volume = from;
     fadeInterval = setInterval(() => {
-      i++;
-      audio.volume = Math.max(0, Math.min(1, from + step * i));
-      if (i >= steps) {
-        clearInterval(fadeInterval);
-        audio.volume = to;
-        if (done) done();
-      }
+      i++; audio.volume = Math.max(0, Math.min(1, from + step * i));
+      if (i >= steps) { clearInterval(fadeInterval); audio.volume = to; done && done(); }
     }, interval);
   }
   function stopCurrent(smooth = true) {
     if (!currentId) return;
     const a = audioMap.get(currentId);
     if (!a) { currentId = null; return; }
-    if (smooth) {
-      fade(a, a.volume ?? 1, 0, 140, () => { try { a.pause(); a.currentTime = 0; } catch {} });
-    } else {
-      try { a.pause(); a.currentTime = 0; } catch {}
-    }
+    if (smooth) fade(a, a.volume ?? 1, 0, 140, () => { try { a.pause(); a.currentTime = 0; } catch {} });
+    else { try { a.pause(); a.currentTime = 0; } catch {} }
     currentId = null;
   }
   function playAnimalSound(id) {
-    if (isMuted) return;
     const next = audioMap.get(id);
     if (!next) return;
-
-    // Restart cleanly if same, or cross-fade if different.
-    if (currentId === id) stopCurrent(false);
-    else stopCurrent(true);
-
+    if (currentId === id) stopCurrent(false); else stopCurrent(true);
     try {
-      next.currentTime = 0;
-      next.volume = 0;
-      currentId = id;
+      next.currentTime = 0; next.volume = 0; currentId = id;
       next.play().then(() => fade(next, 0, 1, 140)).catch(()=>{});
     } catch {}
   }
 
-  // ===== Visual flourishes =====
+  /* =======================
+     UI Flourishes
+  ======================= */
   function menuPuff(btn) {
     if (!btn) return;
     const puff = document.createElement('div');
     puff.className = 'menu-burst';
     const rect = btn.getBoundingClientRect();
-    const w = rect.width, h = rect.height;
-    const count = 14;
+    const w = rect.width, h = rect.height, count = 14;
     for (let i = 0; i < count; i++) {
-      const s = document.createElement('span');
-      s.className = 'menu-spark';
+      const s = document.createElement('span'); s.className = 'menu-spark';
       const x = Math.random() * w * 0.8 + w * 0.1;
       const y = Math.random() * h * 0.6 + h * 0.2;
       const tx = (Math.random() - 0.5) * 140;
@@ -133,19 +113,14 @@
       s.style.setProperty('--d', (420 + Math.random()*280) + 'ms');
       puff.appendChild(s);
     }
-    btn.appendChild(puff);
-    setTimeout(() => puff.remove(), 720);
+    btn.appendChild(puff); setTimeout(() => puff.remove(), 720);
   }
   function sparkBurst(card) {
     if (!card) return;
-    const burst = document.createElement('div');
-    burst.className = 'burst';
-    const rect = card.getBoundingClientRect();
-    const w = rect.width, h = rect.height;
-    const count = 12;
+    const burst = document.createElement('div'); burst.className = 'burst';
+    const rect = card.getBoundingClientRect(), w = rect.width, h = rect.height, count = 12;
     for (let i = 0; i < count; i++) {
-      const s = document.createElement('span');
-      s.className = 'spark';
+      const s = document.createElement('span'); s.className = 'spark';
       const x = Math.random() * w * 0.9 + w * 0.05;
       const y = Math.random() * h * 0.7 + h * 0.15;
       const tx = (Math.random() - 0.5) * 120;
@@ -159,11 +134,12 @@
       s.style.setProperty('--d', (450 + Math.random()*250) + 'ms');
       burst.appendChild(s);
     }
-    card.appendChild(burst);
-    setTimeout(() => burst.remove(), 700);
+    card.appendChild(burst); setTimeout(() => burst.remove(), 700);
   }
 
-  // ===== Explore modal =====
+  /* =======================
+     Explore modal
+  ======================= */
   function openModal(animal, triggerEl) {
     if (!animal) return;
     stopCurrent(false);
@@ -182,9 +158,7 @@
     if (factHome)    factHome.textContent = animal.home || '';
     if (factFun)     factFun.textContent = animal.fun || '';
 
-    if (modalPlay) {
-      modalPlay.onclick = () => { stopCurrent(false); playAnimalSound(animal.id); };
-    }
+    if (modalPlay) modalPlay.onclick = () => { stopCurrent(false); playAnimalSound(animal.id); };
 
     playAnimalSound(animal.id);
     modalClose?.focus();
@@ -201,7 +175,9 @@
     }, 220);
   }
 
-  // ===== Explore scene =====
+  /* =======================
+     Explore scene
+  ======================= */
   function renderScene() {
     if (!sceneEl) return;
     sceneEl.innerHTML = '';
@@ -231,7 +207,9 @@
     });
   }
 
-  // ===== Feedback popup for Match =====
+  /* =======================
+     Feedback popup (for Match)
+  ======================= */
   function ensureFeedbackOverlay() {
     if (fbOverlay) return fbOverlay;
     fbOverlay = document.createElement('div');
@@ -267,32 +245,28 @@
     if (msgEl)     msgEl.innerHTML = message || '';
     if (primary) {
       primary.textContent = primaryLabel || (correct ? 'Next' : 'OK');
-      primary.onclick = () => { if (onPrimary) onPrimary(); hideFeedback(); };
+      primary.onclick = () => { onPrimary && onPrimary(); hideFeedback(); };
     }
-
     if (secondaryLabel && secondary) {
       secondary.classList.remove('hidden');
       secondary.textContent = secondaryLabel;
-      secondary.onclick = () => { if (onSecondary) onSecondary(); hideFeedback(false); };
+      secondary.onclick = () => { onSecondary && onSecondary(); hideFeedback(false); };
     } else if (secondary) {
       secondary.classList.add('hidden');
       secondary.onclick = null;
     }
-
     setTimeout(() => primary?.focus(), 10);
   }
   function hideFeedback(animateOut = true) {
     if (!fbOverlay) return;
     const card = $('.feedback-card', fbOverlay);
-    if (animateOut) {
-      card?.classList.add('out');
-      setTimeout(() => fbOverlay.classList.add('hidden'), 200);
-    } else {
-      fbOverlay.classList.add('hidden');
-    }
+    if (animateOut) { card?.classList.add('out'); setTimeout(() => fbOverlay.classList.add('hidden'), 200); }
+    else { fbOverlay.classList.add('hidden'); }
   }
 
-  // ===== Match (audio-only; advance via Next) =====
+  /* =======================
+     Match game (advance via Next)
+  ======================= */
   function randInt(n) { return Math.floor(Math.random() * n); }
   function sample(array, count) {
     const copy = array.slice(); const out = [];
@@ -303,15 +277,15 @@
     const copy = array.slice();
     for (let i = copy.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [copy[i], copy[j]] = [copy[j], copy[i]];
+      [copy[i], copy[j]] = [copy[j]], [copy[i]];
     }
     return copy;
   }
   function animateMatchSwap(cb) {
-    if (!matchCard) { if (cb) cb(); return; }
+    if (!matchCard) { cb && cb(); return; }
     matchCard.classList.add('swap-out');
     setTimeout(() => {
-      if (cb) cb();
+      cb && cb();
       matchCard.classList.remove('swap-out');
       matchCard.classList.add('swap-in');
       setTimeout(() => matchCard.classList.remove('swap-in'), 220);
@@ -328,7 +302,6 @@
 
     renderChoices(pool);
 
-    // Auto-play prompt once
     setTimeout(() => {
       stopCurrent(false);
       playAnimalSound(answer.id);
@@ -350,17 +323,14 @@
 
       btn.addEventListener('click', () => {
         const answer = getAnimal(currentRound?.answerId);
-        const picked = a;
         if (!answer) return;
+        const picked = a;
 
-        // Stop current audio before feedback
         stopCurrent(false);
 
         if (picked.id === answer.id) {
           btn.classList.add('correct');
-          // Play the correct sound (celebration), child taps Next to continue
           playAnimalSound(answer.id);
-
           const msg = `You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
           showFeedback({
             correct: true,
@@ -371,14 +341,13 @@
           });
         } else {
           btn.classList.add('incorrect');
-          // FIXED TEMPLATE STRING HERE (this typo previously broke the app)
           const msg = `That was the <b>${picked.name}</b> — ${picked.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
           showFeedback({
             correct: false,
             title: 'Nice try!',
             message: msg,
             primaryLabel: 'Keep guessing',
-            onPrimary: () => { /* just close popup */ },
+            onPrimary: () => {},
             secondaryLabel: 'Listen again',
             onSecondary: () => { stopCurrent(false); playAnimalSound(answer.id); }
           });
@@ -389,7 +358,9 @@
     });
   }
 
-  // Themed play/replay button content (SVG + label)
+  /* =======================
+     Buttons & Navigation
+  ======================= */
   function btnPlayHTML(label = 'Play') {
     return `
       <span class="btn-ico" aria-hidden="true">
@@ -407,7 +378,6 @@
     if (playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
   }
 
-  // ===== Navigation =====
   function showHome() {
     closeModal();
     stopCurrent(false);
@@ -433,30 +403,44 @@
     newRound();
   }
 
-  // ===== Init =====
+  /* =======================
+     INIT (robust)
+  ======================= */
   function init() {
-    if (!homeEl || !sceneEl || !matchEl) return; // basic DOM presence check
+    // If something left the overlay visible, hide it to avoid blocking clicks.
+    overlay?.classList.add('hidden');
+    document.body.classList.remove('modal-open');
 
     preloadAudio();
     renderScene();
     showHome();
 
-    // Home buttons
-    btnExplore?.addEventListener('click', () => { menuPuff(btnExplore); setTimeout(showExplore, 150); });
-    btnMatch?.addEventListener('click',   () => { menuPuff(btnMatch);   setTimeout(showMatch, 150); });
+    // Direct listeners
+    btnExplore?.addEventListener('click', (e) => { e.preventDefault(); menuPuff(btnExplore); setTimeout(showExplore, 120); });
+    btnMatch?.addEventListener('click',   (e) => { e.preventDefault(); menuPuff(btnMatch);   setTimeout(showMatch, 120); });
+
+    // Delegated fallback (in case direct listeners didn’t bind)
+    document.addEventListener('click', (e) => {
+      const target = e.target.closest?.('#btn-explore, #btn-match, #btn-back');
+      if (!target) return;
+      e.preventDefault();
+      if (target.id === 'btn-explore') { menuPuff(target); setTimeout(showExplore, 100); }
+      else if (target.id === 'btn-match') { menuPuff(target); setTimeout(showMatch, 100); }
+      else if (target.id === 'btn-back') { showHome(); }
+    });
 
     // Back
-    btnBack?.addEventListener('click', showHome);
+    btnBack?.addEventListener('click', (e) => { e.preventDefault(); showHome(); });
 
-    // Match
+    // Match buttons
     if (playSoundBtn) {
       playSoundBtn.classList.add('btn', 'btn-hero', 'btn-lg');
       playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-      playSoundBtn.addEventListener('click', playCurrentPrompt);
+      playSoundBtn.addEventListener('click', (e) => { e.preventDefault(); playCurrentPrompt(); });
     }
 
-    // Modal close / interactions
-    modalClose?.addEventListener('click', closeModal);
+    // Modal close
+    modalClose?.addEventListener('click', (e) => { e.preventDefault(); closeModal(); });
     overlay?.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
 
@@ -464,6 +448,7 @@
     if (modalPlay) {
       modalPlay.classList.add('btn', 'btn-hero', 'btn-lg');
       modalPlay.innerHTML = btnPlayHTML('Play sound');
+      modalPlay.addEventListener('click', (e) => { e.preventDefault(); /* handler set in openModal */ });
     }
 
     // iOS audio unlock
@@ -473,5 +458,7 @@
     }, { once: true });
   }
 
+  // Try both DOMContentLoaded and window.load (some browsers/extensions can delay one)
   document.addEventListener('DOMContentLoaded', init);
+  window.addEventListener('load', init);
 })();
