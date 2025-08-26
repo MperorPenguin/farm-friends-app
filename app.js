@@ -1,4 +1,8 @@
-/* Farm Friends — core logic with Home screen, exclusive audio, and puff/spark effects */
+/* Farm Friends — v0.2.1-alpha
+   Home screen, exclusive audio, puff/spark effects,
+   polished Match auto-advance + themed replay button,
+   modal open/close audio control + closing animation
+*/
 (() => {
   const $ = (sel, parent = document) => parent.querySelector(sel);
 
@@ -11,12 +15,12 @@
   // Home buttons
   const btnExplore = $('#btn-explore');
   const btnMatch = $('#btn-match');
-  // disabled/coming-soon: #btn-story, #btn-find, #btn-feed (already in HTML)
 
   // Match controls
-  const playSoundBtn = $('#play-sound'); // this becomes "Replay"
+  const playSoundBtn = $('#play-sound'); // themed "Replay" button
   const choicesEl = $('#choices');
   const resultEl = $('#result');
+  const matchCard = $('.match-card', matchEl);
 
   // Modal elements
   const overlay = $('#overlay');
@@ -32,11 +36,13 @@
 
   // State
   let isMuted = false;
-  let audioMap = new Map();       // id -> HTMLAudioElement
+  const audioMap = new Map();     // id -> HTMLAudioElement
   let currentRound = null;        // { answerId, choiceIds: [] }
   let lastFocused = null;
   let currentId = null;           // which animal is currently playing
   let fadeInterval = null;
+  let roundActive = false;        // prevent double-advance in Match
+  let answerEndedHandler = null;  // to clean up listeners
 
   // ========== Exclusive audio helpers ==========
   function createAudio(src) {
@@ -102,7 +108,6 @@
   }
 
   // ========== Fun UI effects ==========
-  // Rainbow puff for menu buttons
   function menuPuff(btn) {
     const puff = document.createElement('div');
     puff.className = 'menu-burst';
@@ -129,7 +134,6 @@
     setTimeout(() => puff.remove(), 720);
   }
 
-  // Straw/spark burst for animal cards (reused)
   function sparkBurst(card) {
     const burst = document.createElement('div');
     burst.className = 'burst';
@@ -158,9 +162,13 @@
 
   // ========== Modal ==========
   function openModal(animal, triggerEl) {
+    // Make sure other mode sounds aren't playing
+    stopCurrent(false);
+
     lastFocused = triggerEl || document.activeElement;
     document.body.classList.add('modal-open');
     overlay.classList.remove('hidden');
+    overlay.classList.remove('closing'); // ensure not closing state
     overlay.setAttribute('aria-hidden', 'false');
 
     modalTitle.textContent = animal.name;
@@ -173,14 +181,31 @@
     factHome.textContent = animal.home || '';
     factFun.textContent = animal.fun || '';
 
-    modalPlay.onclick = () => playAnimalSound(animal.id);
+    modalPlay.onclick = () => {
+      stopCurrent(false);
+      playAnimalSound(animal.id);
+    };
+
+    // Auto-play when opened
+    playAnimalSound(animal.id);
+
+    // Focus close
     modalClose.focus();
   }
+
   function closeModal() {
-    overlay.classList.add('hidden');
-    overlay.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    if (lastFocused && lastFocused.focus) lastFocused.focus();
+    // Cut any playing audio immediately on close
+    stopCurrent(false);
+
+    // Animate out then hide
+    overlay.classList.add('closing');
+    // After animation, hide
+    setTimeout(() => {
+      overlay.classList.add('hidden');
+      overlay.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('modal-open');
+      if (lastFocused && lastFocused.focus) lastFocused.focus();
+    }, 220);
   }
 
   // ========== Explore (scene) ==========
@@ -201,12 +226,14 @@
       card.appendChild(img); card.appendChild(name);
 
       card.addEventListener('click', () => {
+        // visual feedback
         card.classList.add('selected');
         card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
         sparkBurst(card);
         setTimeout(() => card.classList.remove('selected'), 550);
+
+        // open and play
         openModal(a, card);
-        playAnimalSound(a.id);
       });
 
       sceneEl.appendChild(card);
@@ -229,9 +256,32 @@
     return copy;
   }
 
+  function cleanupAnswerEnded() {
+    if (!currentRound) return;
+    const audio = audioMap.get(currentRound.answerId);
+    if (audio && answerEndedHandler) {
+      audio.removeEventListener('ended', answerEndedHandler);
+    }
+    answerEndedHandler = null;
+  }
+
+  function animateMatchSwap(cb) {
+    // fade / scale the card, then call cb(), then fade back in
+    matchCard.classList.add('swap-out');
+    setTimeout(() => {
+      if (cb) cb();
+      matchCard.classList.remove('swap-out');
+      matchCard.classList.add('swap-in');
+      // remove the swap-in after it finishes
+      setTimeout(() => matchCard.classList.remove('swap-in'), 220);
+    }, 220);
+  }
+
   function newRound() {
-    // stop anything currently playing before we set a new round
+    // Stop any audio and old listeners
     stopCurrent(false);
+    cleanupAnswerEnded();
+    roundActive = true;
 
     const choicesCount = Math.min(3, ANIMALS.length);
     const animals = sample(ANIMALS, choicesCount);
@@ -240,11 +290,23 @@
     resultEl.textContent = '';
 
     renderChoices(animals);
-    // auto play the prompt once; button will say "Replay"
+
+    // Auto-play the prompt once; button shows Replay
     setTimeout(() => {
       stopCurrent(false);
       playAnimalSound(answer.id);
-      playSoundBtn.textContent = '▶ Replay';
+      playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+      // When the prompt audio ends and the child hasn't answered, auto-advance after a beat
+      const audio = audioMap.get(answer.id);
+      answerEndedHandler = () => {
+        if (!roundActive) return;
+        // brief pause for anticipation, then swap
+        setTimeout(() => {
+          if (!roundActive) return;
+          animateMatchSwap(() => newRound());
+        }, 600);
+      };
+      audio.addEventListener('ended', answerEndedHandler, { once: true });
     }, 200);
   }
 
@@ -253,26 +315,30 @@
     shuffle(animals).forEach(a => {
       const btn = document.createElement('button');
       btn.className = 'choice';
-      btn.setAttribute('aria-label', a.name); // accessible for parents; not visible
+      btn.setAttribute('aria-label', a.name); // accessible only
       btn.dataset.id = a.id;
 
       const img = document.createElement('img');
       img.src = a.image; img.alt = a.name;
 
-      // IMPORTANT: we do NOT add the text label here (audio-only guessing)
+      // audio-only guessing: no text label
       btn.appendChild(img);
 
       btn.addEventListener('click', () => {
-        const correct = a.id === currentRound.answerId;
+        // Child answered; prevent the ended() auto-advance for this round
+        roundActive = false;
+        cleanupAnswerEnded();
 
-        // stop any currently playing sound before feedback
+        // Stop any current audio before feedback
         stopCurrent(false);
 
+        const correct = a.id === currentRound.answerId;
         if (correct) {
           btn.classList.add('correct');
           resultEl.textContent = 'Great job!';
           playAnimalSound(a.id);
-          setTimeout(() => newRound(), 1000);
+          // cheerful, quick transition to next round
+          setTimeout(() => animateMatchSwap(() => newRound()), 900);
         } else {
           btn.classList.add('incorrect');
           resultEl.textContent = 'Try again!';
@@ -288,34 +354,46 @@
     // ensure exclusivity: stop anything before replay
     stopCurrent(false);
     playAnimalSound(currentRound.answerId);
-    playSoundBtn.textContent = '▶ Replay';
+    playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+  }
+
+  // Themed play/replay button content (SVG + label)
+  function btnPlayHTML(label = 'Play') {
+    return `
+      <span class="btn-ico" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+          <path d="M8 5v14l11-7z"></path>
+        </svg>
+      </span>
+      <span class="btn-label">${label}</span>
+    `;
   }
 
   // ========== Navigation (Home ↔ Explore / Match) ==========
   function showHome() {
     closeModal();
     stopCurrent(false);
+    cleanupAnswerEnded();
     homeEl.classList.remove('hidden');
     sceneEl.classList.add('hidden');
     matchEl.classList.add('hidden');
     btnBack.classList.add('hidden');
   }
   function showExplore() {
+    stopCurrent(false);
+    cleanupAnswerEnded();
     homeEl.classList.add('hidden');
     matchEl.classList.add('hidden');
     sceneEl.classList.remove('hidden');
     btnBack.classList.remove('hidden');
-    // Stop any carry-over audio from home animations or match
-    stopCurrent(false);
   }
   function showMatch() {
+    stopCurrent(false);
     homeEl.classList.add('hidden');
     sceneEl.classList.add('hidden');
     matchEl.classList.remove('hidden');
     btnBack.classList.remove('hidden');
-    // make sure no sounds overlap entering match
-    stopCurrent(false);
-    playSoundBtn.textContent = '▶ Replay';
+    playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     newRound();
   }
 
@@ -326,11 +404,11 @@
     showHome();
 
     // Home buttons with puff + nav
-    btnExplore.addEventListener('click', (e) => {
+    btnExplore.addEventListener('click', () => {
       menuPuff(btnExplore);
       setTimeout(showExplore, 150);
     });
-    btnMatch.addEventListener('click', (e) => {
+    btnMatch.addEventListener('click', () => {
       menuPuff(btnMatch);
       setTimeout(showMatch, 150);
     });
@@ -339,12 +417,18 @@
     btnBack.addEventListener('click', showHome);
 
     // Match handlers
+    playSoundBtn.classList.add('btn', 'btn-hero'); // theme it
+    playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
     playSoundBtn.addEventListener('click', playCurrentPrompt);
 
     // Modal close events
     modalClose.addEventListener('click', closeModal);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal(); });
+
+    // Modal play button theme
+    modalPlay.classList.add('btn', 'btn-hero');
+    modalPlay.innerHTML = btnPlayHTML('Play sound');
 
     // iOS audio unlock
     window.addEventListener('touchstart', () => {
