@@ -1,12 +1,12 @@
 /* ===============================
    Farm Friends – Stylesheet
    Version: v0.2.9-beta
-   - Uses 100dvh / safe-area insets to avoid content hiding under mobile browser bars
-   - Sections scrollable when overflow
-   - Palette & rounded UI as in v0.2.7+
+   - 100dvh + safe-area insets for mobile
+   - Scrollable sections
+   - Rounded friendly UI
+   - Section overlay tints
    =============================== */
 
-/* Brand palette (from your logo) */
 :root{
   --brand-brown:  #3a2a1f;
   --brand-cream:  #fff4e3;
@@ -21,12 +21,10 @@
 
   --focus: #5aaef7;
 
-  /* Background image & default overlay (overridden by route classes) */
   --brand-bg-url: url('assets/brand/background.png');
   --bg-overlay: rgba(255,255,255,0.55);
 }
 
-/* Reset */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
@@ -38,7 +36,6 @@ body{
   overflow-x:hidden;
 }
 
-/* Global blended overlay (tinted per section via body.route-*) */
 body::before{
   content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
   background: var(--bg-overlay);
@@ -52,31 +49,27 @@ body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
 
 #home, main#app, .scene, .match { position:relative; z-index:1; }
 
-/* Safer fixed Back button */
+/* Back button */
 .btn-back{
-  position:fixed; left:12px; top:calc(12px + env(safe-area-inset-top));
-  z-index:20; padding:.7rem 1.1rem; border-radius:999px; border:3px solid var(--brand-brown);
+  position:fixed; left:12px; top:calc(12px + env(safe-area-inset-top)); z-index:20;
+  padding:.7rem 1.1rem; border-radius:999px; border:3px solid var(--brand-brown);
   background:#fff; color:var(--brand-brown); box-shadow:0 8px 20px rgba(0,0,0,.18);
   font-weight:900;
 }
 
-/* ---------------------------------
-   Logo
----------------------------------- */
+/* Logo */
 .logo-img{
   max-width: 380px; width: clamp(220px, 60vw, 380px);
   height:auto; display:block; margin:0 auto 0.75rem;
   filter: drop-shadow(0 8px 20px rgba(0,0,0,.18));
 }
 
-/* ---------------------------------
-   Landing / Menu
----------------------------------- */
+/* Home */
 .home{
-  min-height: 100dvh; /* dynamic viewport for mobile */
+  min-height: 100dvh;
   padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
   display:flex; justify-content:center; align-items:center;
-  overflow:auto; /* allow scroll if content taller than the viewport */
+  overflow:auto;
 }
 .home-inner{ width:min(1100px,96vw); display:grid; gap:1.2rem; }
 .brand{ text-align:center; }
@@ -104,7 +97,7 @@ body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
 .menu-card:active{ transform: translateY(1px) scale(.99); }
 .menu-card.disabled{ opacity:.55; cursor:not-allowed; filter: grayscale(.05); }
 
-/* Rainbow puff for menu */
+/* Menu puff */
 .menu-burst{ position:absolute; inset:0; pointer-events:none; }
 .menu-spark{
   --x:0; --y:0; --tx:0; --ty:-40px; --d:600ms; --sz:10px;
@@ -117,9 +110,7 @@ body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
 }
 @keyframes menu-spark-move{ 0%{opacity:0; transform:translate(0,0) scale(.6)} 10%{opacity:1} 100%{opacity:0; transform:translate(var(--tx), var(--ty)) scale(1.15)} }
 
-/* ---------------------------------
-   Buttons (rounded, friendly)
----------------------------------- */
+/* Buttons */
 .btn{
   font-size: 1rem; padding: .85rem 1.2rem; border-radius: 999px;
   border: 0; cursor:pointer; transition: transform .06s ease, filter .2s ease, box-shadow .2s ease;
@@ -132,22 +123,12 @@ body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
   background: linear-gradient(135deg, var(--brand-green), #6fb85a 60%, #5aa44c);
 }
 .btn-hero:hover{ filter: saturate(1.06) brightness(1.02); }
-.btn-orange{
-  background: linear-gradient(135deg, var(--brand-orange), #e0872f 60%, #cc792a);
-  color:#fff;
-}
-.btn-cream{
-  background: #fff; color: var(--brand-brown); border:2px solid var(--brand-brown);
-}
+.btn-orange{ background: linear-gradient(135deg, var(--brand-orange), #e0872f 60%, #cc792a); color:#fff; }
+.btn-cream{ background: #fff; color: var(--brand-brown); border:2px solid var(--brand-brown); }
 .btn-lg{ font-size:1.1rem; padding:1rem 1.35rem; border-radius:999px; }
 .btn-ico svg{ display:block }
 
-/* Safer fixed elements spacing under mobile bars */
-.safe-bottom { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
-
-/* ---------------------------------
-   Explore grid
----------------------------------- */
+/* Explore grid */
 .scene{
   min-height: 100dvh;
   padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
@@ -188,9 +169,7 @@ body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
 }
 @keyframes spark-move{ 0%{opacity:0; transform:translate(0,0) scale(.6)} 10%{opacity:1} 100%{opacity:0; transform:translate(var(--tx), var(--ty)) scale(1.1)} }
 
-/* ---------------------------------
-   Modal (Explore info card)
----------------------------------- */
+/* Modal */
 .overlay{
   position:fixed; inset:0; background: rgba(0,0,0,.35);
   display:grid; place-items:center; z-index:100; backdrop-filter: blur(4px); transition: opacity .2s ease;
@@ -217,11 +196,9 @@ body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
 .facts dt{ font-weight:800; margin-bottom:.15rem; font-size:1.05rem; color:#5a554f; }
 .facts dd{ margin:0 0 .35rem 0; font-size:1.15rem; line-height:1.35; }
 
-/* Blur behind modal & lock scroll while open */
 body.modal-open #home, body.modal-open main#app{ filter: blur(3px) brightness(.92); }
 body.modal-open{ overflow:hidden; }
 
-/* Close (modal) */
 .modal-close, #modal-close{
   position:absolute; top:calc(10px + env(safe-area-inset-top)); right:10px;
   width:64px; height:64px; border-radius:50%;
@@ -231,9 +208,7 @@ body.modal-open{ overflow:hidden; }
   box-shadow:0 10px 20px rgba(0,0,0,.18);
 }
 
-/* ---------------------------------
-   Guess the Sound
----------------------------------- */
+/* Guess the Sound */
 .match{
   min-height: 100dvh;
   padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
@@ -262,12 +237,7 @@ body.modal-open{ overflow:hidden; }
 .match-card.swap-out{ opacity:0; transform: scale(.98); }
 .match-card.swap-in{ opacity:1; transform: scale(1); }
 
-/* Themed buttons */
-#play-sound.btn-hero{ background: linear-gradient(135deg, var(--brand-green), #6fb85a 60%, #5aa44c); }
-
-/* ---------------------------------
-   Feedback Popup (Match)
----------------------------------- */
+/* Feedback popup */
 .feedback-overlay{
   position:fixed; inset:0; z-index:200; display:grid; place-items:center;
   background: rgba(0,0,0,.32); backdrop-filter: blur(2px);
@@ -287,9 +257,7 @@ body.modal-open{ overflow:hidden; }
 .feedback-overlay.correct #fb-primary.btn-hero{ background: linear-gradient(135deg, var(--brand-green), #6fb85a 60%, #5aa44c); }
 .feedback-overlay.incorrect #fb-secondary.btn-hero{ background: linear-gradient(135deg, var(--brand-orange), #e0872f 60%, #cc792a); }
 
-/* ---------------------------------
-   Utilities & Mobile tweaks
----------------------------------- */
+/* Utilities */
 .hidden{ display:none !important; }
 
 @media (max-width:480px){

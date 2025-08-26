@@ -4,7 +4,7 @@
    - iOS audio unlock is muted
    - Stop audio when tab backgrounded
    - Route classes: route-home / route-explore / route-match
-   - Guess the Sound: no immediate repeats + short cooldown persisted via localStorage
+   - Guess the Sound: no immediate repeats + cooldown via localStorage
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -51,7 +51,7 @@
 
   // Anti-repeat (Guess the Sound)
   const LS_RECENT_KEY = 'ff_recent_answers';
-  const RECENT_SIZE = Math.max(2, Math.min(4, (window.ANIMALS?.length || 8) - 1)); // default cooldown ~3
+  const RECENT_SIZE = Math.max(2, Math.min(4, (window.ANIMALS?.length || 8) - 1)); // ~3 by default
   let recentAnswers = loadRecent();
 
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
@@ -101,7 +101,6 @@
     else { try{ a.pause(); a.currentTime=0; }catch{} }
     currentId=null;
   }
-  // fromUser hints whether call is directly from a click/tap (helps some browsers)
   function playAnimalSound(id, fromUser=false){
     if(!userInteracted && !fromUser){
       return Promise.resolve(); // block non-gesture playback until first interaction
@@ -196,9 +195,9 @@
     if(modalPlay){
       modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id, true); };
       modalPlay.setAttribute('aria-label','Play Sound');
+      modalPlay.innerHTML = btnPlayHTML('Play Sound');
     }
 
-    // Only play from a user gesture (opening the card is a click)
     playAnimalSound(animal.id, true).catch(()=>{});
     modalClose?.focus();
   }
@@ -284,15 +283,11 @@
     for(let i=copy.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=copy[i]; copy[i]=copy[j]; copy[j]=t; }
     return copy;
   }
-
-  // choose an answer from 'pool' that is not in recentAnswers (if possible)
   function chooseAnswer(pool){
     const notRecent = pool.filter(a => !recentAnswers.includes(a.id));
     if(notRecent.length > 0) return notRecent[randInt(notRecent.length)];
-    // if pool is exhausted by recent, relax: pick any (still avoids exact immediate repeat due to history shift)
     return pool[randInt(pool.length)];
   }
-
   function animateMatchSwap(cb){
     if(!matchCard){ cb&&cb(); return; }
     matchCard.classList.add('swap-out');
@@ -303,7 +298,6 @@
       setTimeout(()=>matchCard.classList.remove('swap-in'),200);
     },200);
   }
-
   function newRound(){
     stopCurrent(false);
     if(resultEl) resultEl.textContent='';
@@ -329,11 +323,10 @@
       }
       justNavigatedToMatch = false;
 
-      // push chosen answer into recent history AFTER the round starts
+      // record chosen answer into cooldown history
       pushRecent(answer.id);
     }, 200);
   }
-
   function renderChoices(animals){
     if(!choicesEl) return; choicesEl.innerHTML='';
     shuffle(animals).forEach(a=>{
@@ -418,7 +411,7 @@
     newRound();
   }
 
-  /* ============== INIT (robust) ============== */
+  /* ============== INIT ============== */
   function init(){
     overlay?.classList.add('hidden'); document.body.classList.remove('modal-open');
     preloadAudio(); renderScene();

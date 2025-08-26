@@ -10,27 +10,21 @@
     <meta name="description" content="Tap, listen, learn & giggle! Farm Friends for toddlers." />
     <meta name="theme-color" content="#f3c64e" />
 
-    <!-- Optional: friendly rounded font (Baloo 2). Remove if you prefer fully-offline only. -->
+    <!-- Optional font -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;700;800&display=swap" rel="stylesheet" />
 
-    <!-- Preload the universal background for faster first paint -->
+    <!-- Preload brand images -->
     <link rel="preload" as="image" href="assets/brand/background.png" />
-    <!-- Preload logo (optional) -->
     <link rel="preload" as="image" href="assets/brand/logo.png" />
 
-    <!-- App styles -->
     <link rel="stylesheet" href="styles.css" />
-
-    <!-- PWA (optional) -->
     <link rel="manifest" href="manifest.webmanifest" />
-    <!-- <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/icon-192.png" /> -->
   </head>
 
   <body class="route-home">
-    <!-- Back / up button (auto-hidden on Home) -->
+    <!-- Back button -->
     <button id="btn-back" class="btn-back hidden" aria-label="Back to home">← Back</button>
 
     <!-- =========================
@@ -39,12 +33,10 @@
     <section id="home" class="home" aria-label="Farm Friends start menu" role="region">
       <div class="home-inner">
         <div class="brand">
-          <!-- PNG logo (full opacity, sits above blended background) -->
           <img src="assets/brand/logo.png" alt="Farm Friends logo" class="logo-img" />
         </div>
 
         <div class="menu" role="navigation" aria-label="Main menu">
-          <!-- Explore -->
           <button id="btn-explore" class="menu-card" aria-label="Animal Sounds and Facts">
             <img src="assets/img/horse.png" alt="" aria-hidden="true" />
             <div>
@@ -53,7 +45,6 @@
             </div>
           </button>
 
-          <!-- Guess the Sound -->
           <button id="btn-match" class="menu-card" aria-label="Guess the Sound game">
             <img src="assets/img/duck.png" alt="" aria-hidden="true" />
             <div>
@@ -62,7 +53,6 @@
             </div>
           </button>
 
-          <!-- Coming soon stubs -->
           <button id="btn-story" class="menu-card disabled" aria-label="Story Time (coming soon)" disabled>
             <img src="assets/img/sheep.png" alt="" aria-hidden="true" />
             <div>
@@ -93,7 +83,7 @@
     <!-- =========================
          Explore (grid of animals)
          ========================= -->
-  <main id="app" role="main">
+    <main id="app" role="main">
       <section
         id="scene"
         class="scene hidden"
@@ -108,21 +98,22 @@
       <section id="match" class="match hidden" aria-label="Guess the Sound game" role="region">
         <div class="match-card">
           <div class="prompt">
-       <button id="play-sound" class="btn btn-hero btn-lg" aria-label="Play Sound">
-  <span class="btn-ico" aria-hidden="true">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
-      <path d="M8 5v14l11-7z"></path>
-    </svg>
-  </span>
-  <span class="btn-label">Play Sound</span>
-</button>
-
-<div id="result" class="result" role="status" aria-live="polite">Tap “Play Sound” to hear the clue.</div>
-
-            <!-- Three choices are rendered each round by app.js -->
+            <span class="prompt-text">Which animal makes this sound?</span>
+            <button id="play-sound" class="btn btn-hero btn-lg" aria-label="Play Sound">
+              <span class="btn-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+                  <path d="M8 5v14l11-7z"></path>
+                </svg>
+              </span>
+              <span class="btn-label">Play Sound</span>
+            </button>
           </div>
 
-          <div id="result" class="result" role="status" aria-live="polite"></div>
+          <div id="choices" class="choices" role="group" aria-label="Animal choices">
+            <!-- Three choices rendered each round by app.js -->
+          </div>
+
+          <div id="result" class="result" role="status" aria-live="polite">Tap “Play Sound” to hear the clue.</div>
         </div>
       </section>
     </main>
@@ -137,13 +128,13 @@
         <div class="modal-body">
           <div class="modal-image-wrap">
             <img id="modal-img" src="" alt="" />
-            <button id="modal-play" class="btn btn-hero btn-lg" aria-label="Play this animal's sound">
+            <button id="modal-play" class="btn btn-hero btn-lg" aria-label="Play Sound">
               <span class="btn-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
                   <path d="M8 5v14l11-7z"></path>
                 </svg>
               </span>
-              <span class="btn-label">Play sound</span>
+              <span class="btn-label">Play Sound</span>
             </button>
           </div>
 
@@ -170,13 +161,9 @@
       </div>
     </div>
 
-    <!-- =========================
-         Scripts (order matters)
-         ========================= -->
     <script src="animals.js"></script>
     <script src="app.js"></script>
 
-    <!-- PWA registration (optional but recommended) -->
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {

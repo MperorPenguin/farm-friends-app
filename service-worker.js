@@ -1,19 +1,19 @@
 // Farm Friends – Service Worker
-// Version v0.2.8 (bump CACHE_NAME every time you change code/assets)
+// Version v0.3.0 (bump CACHE_NAME when you change files)
 
-const CACHE_NAME = "farm-friends-v0.2.9";
+const CACHE_NAME = "farm-friends-v0.3.0";
 const ASSETS = [
-  "/",                 // index.html
+  "/",
   "/index.html",
   "/styles.css",
   "/app.js",
   "/animals.js",
 
-  // Brand assets
+  // Brand
   "/assets/brand/background.png",
   "/assets/brand/logo.png",
 
-  // Animal images
+  // Images
   "/assets/img/cow.png",
   "/assets/img/pig.png",
   "/assets/img/chicken.png",
@@ -23,7 +23,7 @@ const ASSETS = [
   "/assets/img/horse.png",
   "/assets/img/donkey.png",
 
-  // Animal sounds
+  // Audio
   "/assets/audio/cow.mp3",
   "/assets/audio/pig.mp3",
   "/assets/audio/chicken.mp3",
@@ -34,17 +34,13 @@ const ASSETS = [
   "/assets/audio/donkey.mp3"
 ];
 
-// Install: cache all app shell files
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
   self.skipWaiting();
 });
 
-// Activate: clean up old caches
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -54,10 +50,8 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch: cache-first, fallback to network
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-  // Only handle GET requests
   if (req.method !== "GET") return;
 
   event.respondWith(
@@ -66,14 +60,13 @@ self.addEventListener("fetch", (event) => {
         cached ||
         fetch(req)
           .then((res) => {
-            // Optionally cache new requests (only same-origin)
             if (req.url.startsWith(self.location.origin)) {
               const copy = res.clone();
               caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
             }
             return res;
           })
-          .catch(() => cached) // fallback to cached if offline
+          .catch(() => cached)
       );
     })
   );
