@@ -1,8 +1,9 @@
-/* Farm Friends — v0.2.9-beta
-   - No audio until user interacts (prevents "cow on load")
+/* Farm Friends — v0.2.9-beta+ (Play Sound label everywhere)
+   - No audio until user interacts (prevents autoplay on load)
    - iOS audio unlock is muted (no audible blip)
    - Stop audio when tab backgrounded
-   - Route classes unchanged; Explore/Match show <main> reliably
+   - Route classes: route-home / route-explore / route-match
+   - Buttons & helper text use "Play Sound" consistently
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -43,7 +44,7 @@
   let currentId = null;
   let fadeInterval = null;
 
-  // New: user gesture gate
+  // User gesture gate
   let userInteracted = false;
   let justNavigatedToMatch = false;
 
@@ -83,9 +84,8 @@
   }
   // fromUser hints whether call is directly from a click/tap (helps some browsers)
   function playAnimalSound(id, fromUser=false){
-    // Gate any non-user-initiated playback until first interaction
     if(!userInteracted && !fromUser){
-      return Promise.resolve();
+      return Promise.resolve(); // block non-gesture playback until first interaction
     }
     const next = audioMap.get(id);
     if(!next) return Promise.resolve();
@@ -280,11 +280,11 @@
       stopCurrent(false);
       // Only autoplay the first clue if user just navigated here AND we have a gesture
       if(justNavigatedToMatch && userInteracted){
-        playAnimalSound(answer.id, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
+        playAnimalSound(answer.id, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.'; });
       } else {
-        if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.';
+        if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.';
       }
-      if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+      if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
       justNavigatedToMatch = false;
     }, 200);
   }
@@ -308,7 +308,7 @@
           const msg=`That was the <b>${a.name}</b> — ${a.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
           showFeedback({
             correct:false, title:'Nice try!', message:msg, primaryLabel:'Keep guessing', onPrimary:()=>{},
-            secondaryLabel:'Listen again', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id, true).catch(()=>{}); }
+            secondaryLabel:'Play Sound', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id, true).catch(()=>{}); }
           });
         }
       });
@@ -317,7 +317,7 @@
   }
 
   /* ============== Buttons & Navigation ============== */
-  function btnPlayHTML(label='Play'){ return `
+  function btnPlayHTML(label='Play Sound'){ return `
     <span class="btn-ico" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
         <path d="M8 5v14l11-7z"></path>
@@ -328,8 +328,8 @@
     if(!currentRound) return;
     markInteracted();
     stopCurrent(false);
-    playAnimalSound(currentRound.answerId, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
-    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+    playAnimalSound(currentRound.answerId, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.'; });
+    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
   }
 
   function setRoute(route){
@@ -362,7 +362,7 @@
     sceneEl?.classList.add('hidden');
     matchEl?.classList.remove('hidden');
     btnBack?.classList.remove('hidden');
-    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
     justNavigatedToMatch = true;
     newRound();
   }
@@ -390,7 +390,7 @@
     // Match controls
     if(playSoundBtn){
       playSoundBtn.classList.add('btn','btn-hero','btn-lg');
-      playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
       playSoundBtn.addEventListener('click', (e)=>{ e.preventDefault(); playCurrentPrompt(); });
     }
 
@@ -400,7 +400,7 @@
     document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
     if(modalPlay){
       modalPlay.classList.add('btn','btn-hero','btn-lg');
-      modalPlay.innerHTML = btnPlayHTML('Play sound');
+      modalPlay.innerHTML = btnPlayHTML('Play Sound');
     }
 
     // iOS audio unlock (muted)
