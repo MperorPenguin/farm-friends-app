@@ -1,7 +1,7 @@
 // Farm Friends – Service Worker
 // Version v0.2.8 (bump CACHE_NAME every time you change code/assets)
 
-const CACHE_NAME = "farm-friends-v0.2.8";
+const CACHE_NAME = "farm-friends-v0.2.9";
 const ASSETS = [
   "/",                 // index.html
   "/index.html",

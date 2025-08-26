@@ -1,13 +1,14 @@
-/* Farm Friends — v0.2.8-alpha
-   Fix: ensure <main id="app"> is shown in Explore/Match, even if it has 'hidden'.
-   Also re-hide <main> on Home for a clean landing layout.
-   No feature changes otherwise.
+/* Farm Friends — v0.2.9-beta
+   - No audio until user interacts (prevents "cow on load")
+   - iOS audio unlock is muted (no audible blip)
+   - Stop audio when tab backgrounded
+   - Route classes unchanged; Explore/Match show <main> reliably
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
 
   // Elements
-  const appEl   = $('#app');       // <-- new
+  const appEl   = $('#app');
   const homeEl  = $('#home');
   const sceneEl = $('#scene');
   const matchEl = $('#match');
@@ -42,59 +43,118 @@
   let currentId = null;
   let fadeInterval = null;
 
+  // New: user gesture gate
+  let userInteracted = false;
+  let justNavigatedToMatch = false;
+
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
 
   /* ============== AUDIO (exclusive) ============== */
-  function createAudio(src){ const a=new Audio(src); a.preload='auto'; a.setAttribute('aria-hidden','true'); a.volume=1; return a; }
-  function preloadAudio(){ (ANIMALS||[]).forEach(animal=>{ if(!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound)); }); }
+  function createAudio(src){
+    const a = new Audio(src);
+    a.preload = 'auto';
+    a.autoplay = false;
+    a.setAttribute('aria-hidden','true');
+    a.volume = 1;
+    return a;
+  }
+  function preloadAudio(){
+    (ANIMALS||[]).forEach(animal=>{
+      if(!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound));
+    });
+  }
   function fade(audio, from, to, ms, done){
     if(!audio){ done&&done(); return; }
     if(fadeInterval) clearInterval(fadeInterval);
-    const steps=10, step=(to-from)/steps, interval=Math.max(10, ms/steps); let i=0; audio.volume=from;
-    fadeInterval=setInterval(()=>{ i++; audio.volume=Math.max(0,Math.min(1,from+step*i));
-      if(i>=steps){ clearInterval(fadeInterval); audio.volume=to; done&&done(); } }, interval);
+    const steps=10, step=(to-from)/steps, interval=Math.max(10, ms/steps);
+    let i=0; audio.volume=from;
+    fadeInterval=setInterval(()=>{
+      i++; audio.volume=Math.max(0,Math.min(1,from+step*i));
+      if(i>=steps){ clearInterval(fadeInterval); audio.volume=to; done&&done(); }
+    }, interval);
   }
   function stopCurrent(smooth=true){
     if(!currentId) return;
-    const a=audioMap.get(currentId); if(!a){ currentId=null; return; }
-    if(smooth) fade(a, a.volume??1, 0, 140, ()=>{ try{ a.pause(); a.currentTime=0; }catch{} });
+    const a=audioMap.get(currentId);
+    if(!a){ currentId=null; return; }
+    if(smooth) fade(a, a.volume??1, 0, 120, ()=>{ try{ a.pause(); a.currentTime=0; }catch{} });
     else { try{ a.pause(); a.currentTime=0; }catch{} }
     currentId=null;
   }
-  function playAnimalSound(id){
-    const next=audioMap.get(id); if(!next) return Promise.resolve();
-    if(currentId===id) stopCurrent(false); else stopCurrent(true);
+  // fromUser hints whether call is directly from a click/tap (helps some browsers)
+  function playAnimalSound(id, fromUser=false){
+    // Gate any non-user-initiated playback until first interaction
+    if(!userInteracted && !fromUser){
+      return Promise.resolve();
+    }
+    const next = audioMap.get(id);
+    if(!next) return Promise.resolve();
+
+    if(currentId === id) stopCurrent(false); else stopCurrent(true);
+
     try{
-      next.currentTime=0; next.volume=0; currentId=id;
-      return next.play().then(()=>fade(next,0,1,140)).catch(err=>{ throw err; });
+      next.currentTime = 0;
+      next.volume = 0;
+      currentId = id;
+      return next.play()
+        .then(()=>fade(next,0,1,120))
+        .catch(err=>{ throw err; });
     }catch(e){ return Promise.reject(e); }
   }
+
+  // Pause audio if app/tab goes to background
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden) stopCurrent(false);
+  });
+
+  /* ============== USER INTERACTION UNLOCK ============== */
+  function markInteracted(){
+    if(userInteracted) return;
+    userInteracted = true;
+
+    // iOS unlock trick but MUTED so there's no click/pop
+    const first = audioMap.values().next().value;
+    if(first){
+      const wasMuted = first.muted;
+      try{
+        first.muted = true;
+        first.play().then(()=>first.pause()).finally(()=>{ first.muted = wasMuted; });
+      }catch{ first.muted = wasMuted; }
+    }
+  }
+  ['pointerdown','mousedown','touchstart','keydown'].forEach(evt=>{
+    window.addEventListener(evt, markInteracted, { passive:true, once:false });
+  });
 
   /* ============== UI FLOURISHES ============== */
   function menuPuff(btn){
     if(!btn) return; const puff=document.createElement('div'); puff.className='menu-burst';
     const rect=btn.getBoundingClientRect(); const w=rect.width,h=rect.height,count=14;
-    for(let i=0;i<count;i++){ const s=document.createElement('span'); s.className='menu-spark';
-      const x=Math.random()*w*0.8+w*0.1; const y=Math.random()*h*0.6+h*0.2;
-      const tx=(Math.random()-0.5)*140; const ty=-(40+Math.random()*90);
+    for(let i=0;i<count;i++){
+      const s=document.createElement('span'); s.className='menu-spark';
+      const x=Math.random()*w*0.8+w*0.1, y=Math.random()*h*0.6+h*0.2;
+      const tx=(Math.random()-0.5)*140, ty=-(40+Math.random()*90);
       const size=8+Math.random()*12;
       s.style.setProperty('--x',Math.round(x)+'px'); s.style.setProperty('--y',Math.round(y)+'px');
       s.style.setProperty('--tx',Math.round(tx)+'px'); s.style.setProperty('--ty',Math.round(ty)+'px');
       s.style.setProperty('--sz',Math.round(size)+'px'); s.style.setProperty('--d',(420+Math.random()*280)+'ms');
-      puff.appendChild(s); }
+      puff.appendChild(s);
+    }
     btn.appendChild(puff); setTimeout(()=>puff.remove(),720);
   }
   function sparkBurst(card){
     if(!card) return; const burst=document.createElement('div'); burst.className='burst';
     const rect=card.getBoundingClientRect(); const w=rect.width,h=rect.height,count=12;
-    for(let i=0;i<count;i++){ const s=document.createElement('span'); s.className='spark';
-      const x=Math.random()*w*0.9+w*0.05; const y=Math.random()*h*0.7+h*0.15;
-      const tx=(Math.random()-0.5)*120; const ty=-(40+Math.random()*80);
+    for(let i=0;i<count;i++){
+      const s=document.createElement('span'); s.className='spark';
+      const x=Math.random()*w*0.9+w*0.05, y=Math.random()*h*0.7+h*0.15;
+      const tx=(Math.random()-0.5)*120, ty=-(40+Math.random()*80);
       const size=6+Math.random()*10;
       s.style.setProperty('--x',Math.round(x)+'px'); s.style.setProperty('--y',Math.round(y)+'px');
       s.style.setProperty('--tx',Math.round(tx)+'px'); s.style.setProperty('--ty',Math.round(ty)+'px');
       s.style.setProperty('--sz',Math.round(size)+'px'); s.style.setProperty('--d',(450+Math.random()*250)+'ms');
-      burst.appendChild(s); }
+      burst.appendChild(s);
+    }
     card.appendChild(burst); setTimeout(()=>burst.remove(),700);
   }
 
@@ -103,7 +163,8 @@
     if(!animal) return; stopCurrent(false);
     lastFocused = triggerEl || document.activeElement;
     document.body.classList.add('modal-open');
-    overlay?.classList.remove('hidden','closing'); overlay?.setAttribute('aria-hidden','false');
+    overlay?.classList.remove('hidden','closing');
+    overlay?.setAttribute('aria-hidden','false');
 
     if(modalTitle) modalTitle.textContent = animal.name || '';
     if(modalImg){ modalImg.src = animal.image || ''; modalImg.alt = animal.name || ''; }
@@ -113,8 +174,10 @@
     if(factHome)    factHome.textContent    = animal.home    || '';
     if(factFun)     factFun.textContent     = animal.fun     || '';
 
-    if(modalPlay) modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id); };
-    playAnimalSound(animal.id).catch(()=>{});
+    if(modalPlay) modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id, true); };
+
+    // Only play from a user gesture (opening the card is a click)
+    playAnimalSound(animal.id, true).catch(()=>{});
     modalClose?.focus();
   }
   function closeModal(){
@@ -122,10 +185,11 @@
     if(!overlay) return;
     overlay.classList.add('closing');
     setTimeout(()=>{
-      overlay.classList.add('hidden'); overlay.setAttribute('aria-hidden','true');
+      overlay.classList.add('hidden');
+      overlay.setAttribute('aria-hidden','true');
       document.body.classList.remove('modal-open');
       if(lastFocused && lastFocused.focus) lastFocused.focus();
-    },220);
+    },200);
   }
 
   /* ============== EXPLORE SCENE ============== */
@@ -134,11 +198,12 @@
     (ANIMALS||[]).forEach(a=>{
       const card=document.createElement('button'); card.className='animal';
       card.style.background = a.color || 'var(--card)'; card.dataset.id=a.id;
-      card.setAttribute('aria-label', `${a.name} — open card`);
+      card.setAttribute('aria-label',`${a.name} — open card`);
       const img=document.createElement('img'); img.src=a.image; img.alt=a.name;
       const name=document.createElement('div'); name.className='animal-name'; name.textContent=a.name;
       card.appendChild(img); card.appendChild(name);
       card.addEventListener('click', ()=>{
+        markInteracted();
         card.classList.add('selected'); card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
         sparkBurst(card); setTimeout(()=>card.classList.remove('selected'),550);
         openModal(a, card);
@@ -192,20 +257,36 @@
 
   function animateMatchSwap(cb){
     if(!matchCard){ cb&&cb(); return; }
-    matchCard.classList.add('swap-out'); setTimeout(()=>{ cb&&cb(); matchCard.classList.remove('swap-out'); matchCard.classList.add('swap-in'); setTimeout(()=>matchCard.classList.remove('swap-in'),220); },220);
+    matchCard.classList.add('swap-out');
+    setTimeout(()=>{
+      cb&&cb();
+      matchCard.classList.remove('swap-out');
+      matchCard.classList.add('swap-in');
+      setTimeout(()=>matchCard.classList.remove('swap-in'),200);
+    },200);
   }
 
   function newRound(){
     stopCurrent(false); if(resultEl) resultEl.textContent='';
+
     const choicesCount=Math.min(3,(ANIMALS||[]).length);
-    const pool=sample(ANIMALS, choicesCount); const answer=pool[randInt(pool.length)];
+    const pool=sample(ANIMALS, choicesCount);
+    const answer=pool[randInt(pool.length)];
     currentRound={ answerId: answer.id, choiceIds: pool.map(a=>a.id) };
+
     renderChoices(pool);
+
     setTimeout(()=>{
       stopCurrent(false);
-      playAnimalSound(answer.id).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
+      // Only autoplay the first clue if user just navigated here AND we have a gesture
+      if(justNavigatedToMatch && userInteracted){
+        playAnimalSound(answer.id, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
+      } else {
+        if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.';
+      }
       if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
-    },200);
+      justNavigatedToMatch = false;
+    }, 200);
   }
 
   function renderChoices(animals){
@@ -214,19 +295,20 @@
       const btn=document.createElement('button'); btn.className='choice'; btn.setAttribute('aria-label',a.name); btn.dataset.id=a.id;
       const img=document.createElement('img'); img.src=a.image; img.alt=a.name; btn.appendChild(img);
       btn.addEventListener('click', ()=>{
+        markInteracted();
         const answer = getAnimal(currentRound?.answerId); if(!answer) return;
         stopCurrent(false);
         if(a.id===answer.id){
-          btn.classList.add('correct'); playAnimalSound(answer.id).catch(()=>{});
+          btn.classList.add('correct'); playAnimalSound(answer.id, true).catch(()=>{});
           const msg=`You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
-          showFeedback({ correct:true, title:'Well done!', message:msg, primaryLabel:'Next', onPrimary:()=>{ stopCurrent(false); animateMatchSwap(()=>newRound()); } });
+          showFeedback({ correct:true, title:'Well done!', message:msg, primaryLabel:'Next',
+            onPrimary:()=>{ stopCurrent(false); animateMatchSwap(()=>newRound()); } });
         }else{
           btn.classList.add('incorrect');
           const msg=`That was the <b>${a.name}</b> — ${a.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
           showFeedback({
-            correct:false, title:'Nice try!', message:msg,
-            primaryLabel:'Keep guessing', onPrimary:()=>{},
-            secondaryLabel:'Listen again', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id).catch(()=>{}); }
+            correct:false, title:'Nice try!', message:msg, primaryLabel:'Keep guessing', onPrimary:()=>{},
+            secondaryLabel:'Listen again', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id, true).catch(()=>{}); }
           });
         }
       });
@@ -243,8 +325,10 @@
     </span>
     <span class="btn-label">${label}</span>`; }
   function playCurrentPrompt(){
-    if(!currentRound) return; stopCurrent(false);
-    playAnimalSound(currentRound.answerId).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
+    if(!currentRound) return;
+    markInteracted();
+    stopCurrent(false);
+    playAnimalSound(currentRound.answerId, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Replay sound” to hear the clue.'; });
     if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
   }
 
@@ -255,7 +339,6 @@
   function showHome(){
     closeModal(); stopCurrent(false);
     setRoute('route-home');
-    // hide app container on Home (clean landing)
     appEl?.classList.add('hidden');
     homeEl?.classList.remove('hidden');
     sceneEl?.classList.add('hidden');
@@ -265,7 +348,6 @@
   function showExplore(){
     stopCurrent(false);
     setRoute('route-explore');
-    // show app container and scene
     appEl?.classList.remove('hidden');
     homeEl?.classList.add('hidden');
     matchEl?.classList.add('hidden');
@@ -275,13 +357,13 @@
   function showMatch(){
     stopCurrent(false);
     setRoute('route-match');
-    // show app container and match
     appEl?.classList.remove('hidden');
     homeEl?.classList.add('hidden');
     sceneEl?.classList.add('hidden');
     matchEl?.classList.remove('hidden');
     btnBack?.classList.remove('hidden');
     if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Replay sound');
+    justNavigatedToMatch = true;
     newRound();
   }
 
@@ -289,18 +371,16 @@
   function init(){
     overlay?.classList.add('hidden'); document.body.classList.remove('modal-open');
     preloadAudio(); renderScene();
-
-    // Start on Home (even if someone hard-linked to /explore)
     showHome();
 
     // Home buttons + delegated fallback
-    btnExplore?.addEventListener('click', (e)=>{ e.preventDefault(); menuPuff(btnExplore); setTimeout(showExplore,120); });
-    btnMatch  ?.addEventListener('click', (e)=>{ e.preventDefault(); menuPuff(btnMatch);   setTimeout(showMatch,120); });
+    btnExplore?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnExplore); setTimeout(showExplore,120); });
+    btnMatch  ?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnMatch);   setTimeout(showMatch,120); });
     document.addEventListener('click', (e)=>{
       const t=e.target.closest?.('#btn-explore,#btn-match,#btn-back');
       if(!t) return; e.preventDefault();
-      if(t.id==='btn-explore'){ menuPuff(t); setTimeout(showExplore,100); }
-      else if(t.id==='btn-match'){ menuPuff(t); setTimeout(showMatch,100); }
+      if(t.id==='btn-explore'){ markInteracted(); menuPuff(t); setTimeout(showExplore,100); }
+      else if(t.id==='btn-match'){ markInteracted(); menuPuff(t); setTimeout(showMatch,100); }
       else if(t.id==='btn-back'){ showHome(); }
     });
 
@@ -323,11 +403,8 @@
       modalPlay.innerHTML = btnPlayHTML('Play sound');
     }
 
-    // iOS audio unlock
-    window.addEventListener('touchstart', ()=>{
-      const any = audioMap.values().next().value;
-      if(any && any.paused){ any.play().then(()=>any.pause()).catch(()=>{}); }
-    }, { once:true });
+    // iOS audio unlock (muted)
+    window.addEventListener('touchstart', markInteracted, { once:true, passive:true });
   }
 
   document.addEventListener('DOMContentLoaded', init);
