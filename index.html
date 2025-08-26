@@ -108,18 +108,17 @@
       <section id="match" class="match hidden" aria-label="Guess the Sound game" role="region">
         <div class="match-card">
           <div class="prompt">
-            <span class="prompt-text">Which animal makes this sound?</span>
-            <button id="play-sound" class="btn btn-hero btn-lg" aria-label="Replay the sound">
-              <span class="btn-ico" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
-                  <path d="M8 5v14l11-7z"></path>
-                </svg>
-              </span>
-              <span class="btn-label">Replay sound</span>
-            </button>
-          </div>
+       <button id="play-sound" class="btn btn-hero btn-lg" aria-label="Play Sound">
+  <span class="btn-ico" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+      <path d="M8 5v14l11-7z"></path>
+    </svg>
+  </span>
+  <span class="btn-label">Play Sound</span>
+</button>
 
-          <div id="choices" class="choices" role="group" aria-label="Animal choices">
+<div id="result" class="result" role="status" aria-live="polite">Tap “Play Sound” to hear the clue.</div>
+
             <!-- Three choices are rendered each round by app.js -->
           </div>
 

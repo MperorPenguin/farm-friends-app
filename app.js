@@ -1,9 +1,10 @@
-/* Farm Friends — v0.2.9-beta+ (Play Sound label everywhere)
-   - No audio until user interacts (prevents autoplay on load)
-   - iOS audio unlock is muted (no audible blip)
+/* Farm Friends — v0.3.0-beta
+   - "Play Sound" wording everywhere
+   - No audio until user interacts
+   - iOS audio unlock is muted
    - Stop audio when tab backgrounded
    - Route classes: route-home / route-explore / route-match
-   - Buttons & helper text use "Play Sound" consistently
+   - Guess the Sound: no immediate repeats + short cooldown persisted via localStorage
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -48,7 +49,25 @@
   let userInteracted = false;
   let justNavigatedToMatch = false;
 
+  // Anti-repeat (Guess the Sound)
+  const LS_RECENT_KEY = 'ff_recent_answers';
+  const RECENT_SIZE = Math.max(2, Math.min(4, (window.ANIMALS?.length || 8) - 1)); // default cooldown ~3
+  let recentAnswers = loadRecent();
+
   const getAnimal = (id) => ANIMALS.find(a => a.id === id);
+
+  function loadRecent(){
+    try {
+      const raw = localStorage.getItem(LS_RECENT_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(0, 8) : [];
+    } catch { return []; }
+  }
+  function pushRecent(id){
+    if(!id) return;
+    recentAnswers = [id, ...recentAnswers.filter(x => x !== id)].slice(0, RECENT_SIZE);
+    try { localStorage.setItem(LS_RECENT_KEY, JSON.stringify(recentAnswers)); } catch {}
+  }
 
   /* ============== AUDIO (exclusive) ============== */
   function createAudio(src){
@@ -174,7 +193,10 @@
     if(factHome)    factHome.textContent    = animal.home    || '';
     if(factFun)     factFun.textContent     = animal.fun     || '';
 
-    if(modalPlay) modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id, true); };
+    if(modalPlay){
+      modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id, true); };
+      modalPlay.setAttribute('aria-label','Play Sound');
+    }
 
     // Only play from a user gesture (opening the card is a click)
     playAnimalSound(animal.id, true).catch(()=>{});
@@ -252,8 +274,24 @@
 
   /* ============== MATCH GAME ============== */
   function randInt(n){ return Math.floor(Math.random()*n); }
-  function sample(arr,count){ const copy=arr.slice(); const out=[]; while(copy.length && out.length<count){ out.push(copy.splice(randInt(copy.length),1)[0]); } return out; }
-  function shuffle(arr){ const copy=arr.slice(); for(let i=copy.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=copy[i]; copy[i]=copy[j]; copy[j]=t; } return copy; }
+  function sample(arr,count){
+    const copy=arr.slice(); const out=[];
+    while(copy.length && out.length<count){ out.push(copy.splice(randInt(copy.length),1)[0]); }
+    return out;
+  }
+  function shuffle(arr){
+    const copy=arr.slice();
+    for(let i=copy.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=copy[i]; copy[i]=copy[j]; copy[j]=t; }
+    return copy;
+  }
+
+  // choose an answer from 'pool' that is not in recentAnswers (if possible)
+  function chooseAnswer(pool){
+    const notRecent = pool.filter(a => !recentAnswers.includes(a.id));
+    if(notRecent.length > 0) return notRecent[randInt(notRecent.length)];
+    // if pool is exhausted by recent, relax: pick any (still avoids exact immediate repeat due to history shift)
+    return pool[randInt(pool.length)];
+  }
 
   function animateMatchSwap(cb){
     if(!matchCard){ cb&&cb(); return; }
@@ -267,25 +305,32 @@
   }
 
   function newRound(){
-    stopCurrent(false); if(resultEl) resultEl.textContent='';
+    stopCurrent(false);
+    if(resultEl) resultEl.textContent='';
 
     const choicesCount=Math.min(3,(ANIMALS||[]).length);
     const pool=sample(ANIMALS, choicesCount);
-    const answer=pool[randInt(pool.length)];
+
+    const answer=chooseAnswer(pool);
     currentRound={ answerId: answer.id, choiceIds: pool.map(a=>a.id) };
 
     renderChoices(pool);
 
     setTimeout(()=>{
       stopCurrent(false);
-      // Only autoplay the first clue if user just navigated here AND we have a gesture
       if(justNavigatedToMatch && userInteracted){
         playAnimalSound(answer.id, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.'; });
       } else {
         if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.';
       }
-      if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+      if(playSoundBtn){
+        playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+        playSoundBtn.setAttribute('aria-label','Play Sound');
+      }
       justNavigatedToMatch = false;
+
+      // push chosen answer into recent history AFTER the round starts
+      pushRecent(answer.id);
     }, 200);
   }
 
@@ -329,7 +374,10 @@
     markInteracted();
     stopCurrent(false);
     playAnimalSound(currentRound.answerId, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.'; });
-    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+    if(playSoundBtn){
+      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+      playSoundBtn.setAttribute('aria-label','Play Sound');
+    }
   }
 
   function setRoute(route){
@@ -362,7 +410,10 @@
     sceneEl?.classList.add('hidden');
     matchEl?.classList.remove('hidden');
     btnBack?.classList.remove('hidden');
-    if(playSoundBtn) playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+    if(playSoundBtn){
+      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+      playSoundBtn.setAttribute('aria-label','Play Sound');
+    }
     justNavigatedToMatch = true;
     newRound();
   }
@@ -391,6 +442,7 @@
     if(playSoundBtn){
       playSoundBtn.classList.add('btn','btn-hero','btn-lg');
       playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+      playSoundBtn.setAttribute('aria-label','Play Sound');
       playSoundBtn.addEventListener('click', (e)=>{ e.preventDefault(); playCurrentPrompt(); });
     }
 
@@ -401,6 +453,7 @@
     if(modalPlay){
       modalPlay.classList.add('btn','btn-hero','btn-lg');
       modalPlay.innerHTML = btnPlayHTML('Play Sound');
+      modalPlay.setAttribute('aria-label','Play Sound');
     }
 
     // iOS audio unlock (muted)
