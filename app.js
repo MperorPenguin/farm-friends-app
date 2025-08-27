@@ -1,10 +1,10 @@
-/* Farm Friends — v0.4.4-beta
+/* Farm Friends — v0.4.5-beta
    Fixes:
-   - Restores entrance sequence for FEED (entering → focused → show-choices)
-   - Restores menu puff + confetti animations
-   - Adds image fallback for food choices (emoji/label if PNG missing)
-   - Keeps 3 choices (1 correct + 2 decoys), autoplay-after-interaction,
-     bigger feedback popups, exclusive audio, and “Play Sound” buttons.
+   - Restores FEEDBACK POPUPS (correct/incorrect) with big friendly overlay
+   - On correct → “Next” advances to next round (Match/Feed)
+   - On incorrect → “Keep trying” and “Play Sound” (replay clue)
+   - Keeps: 3 choices in Feed (1 correct + 2 decoys), image fallback for food,
+     entrance animations, menu puff, confetti, exclusive audio, autoplay after first interaction.
 */
 
 (() => {
@@ -51,8 +51,8 @@
 
   // State
   const audioMap = new Map();
-  let currentRound = null; // Guess the Sound
-  let currentFeed  = null; // Feed the Animal
+  let currentRound = null; // Guess the Sound (answer id)
+  let currentFeed  = null; // Feed the Animal (animal id)
   let lastFocused  = null;
   let currentId    = null;
   let fadeInterval = null;
@@ -142,7 +142,7 @@
     window.addEventListener(evt,markInteracted,{passive:true});
   });
 
-  /* ============== UI FLOURISHES (restored) ============== */
+  /* ============== UI FLOURISHES (menu puff + confetti) ============== */
   function menuPuff(btn){
     if(!btn) return;
     const puff=document.createElement('div'); puff.className='menu-burst';
@@ -185,6 +185,66 @@
     }
     container.appendChild(layer);
     setTimeout(()=>layer.remove(), 1100);
+  }
+
+  /* ============== FEEDBACK OVERLAY (restored) ============== */
+  let fbOverlayEl;
+  function ensureFeedbackOverlay(){
+    if(fbOverlayEl) return fbOverlayEl;
+    fbOverlayEl=document.createElement('div');
+    fbOverlayEl.className='feedback-overlay hidden';
+    fbOverlayEl.innerHTML=`
+      <div class="feedback-card" role="dialog" aria-modal="true" aria-live="assertive">
+        <div class="fb-title" id="fb-title"></div>
+        <div class="fb-message" id="fb-message"></div>
+        <div class="fb-actions">
+          <button id="fb-secondary" class="btn btn-hero btn-lg hidden"></button>
+          <button id="fb-primary" class="btn btn-hero btn-lg"></button>
+        </div>
+      </div>`;
+    document.body.appendChild(fbOverlayEl);
+    return fbOverlayEl;
+  }
+  function showFeedback({correct,title,message,primaryLabel,onPrimary,secondaryLabel,onSecondary}){
+    const el=ensureFeedbackOverlay();
+    const titleEl=$('#fb-title',el);
+    const msgEl=$('#fb-message',el);
+    const primary=$('#fb-primary',el);
+    const secondary=$('#fb-secondary',el);
+    const card=$('.feedback-card',el);
+
+    el.classList.remove('hidden');
+    el.classList.toggle('correct',!!correct);
+    el.classList.toggle('incorrect',!correct);
+    card?.classList.remove('out');
+
+    titleEl.textContent = title || (correct ? 'Well done!' : 'Not quite!');
+    msgEl.innerHTML = message || '';
+
+    primary.textContent = primaryLabel || (correct ? 'Next' : 'OK');
+    primary.onclick = ()=>{ onPrimary && onPrimary(); hideFeedback(); };
+
+    if(secondaryLabel){
+      secondary.classList.remove('hidden');
+      secondary.textContent = secondaryLabel;
+      secondary.onclick = ()=>{ onSecondary && onSecondary(); hideFeedback(false); };
+    }else{
+      secondary.classList.add('hidden');
+      secondary.onclick = null;
+    }
+
+    if(correct) confettiBurst(card);
+    setTimeout(()=>primary.focus(), 10);
+  }
+  function hideFeedback(animateOut=true){
+    if(!fbOverlayEl) return;
+    const card=$('.feedback-card',fbOverlayEl);
+    if(animateOut){
+      card.classList.add('out');
+      setTimeout(()=>fbOverlayEl.classList.add('hidden'), 200);
+    }else{
+      fbOverlayEl.classList.add('hidden');
+    }
   }
 
   /* ============== EXPLORE MODAL ============== */
@@ -243,7 +303,6 @@
     if(pool.length>0) return pool[randInt(pool.length)];
     return ids[randInt(ids.length)];
   }
-
   function btnPlayHTML(label='Play Sound'){ return `
     <span class="btn-ico" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
@@ -278,11 +337,29 @@
         stopCurrent(false);
         if(opt.id===answerId){
           btn.classList.add('correct');
+          const msg=`You picked the <b>${answer.name}</b> — great listening!`;
+          showFeedback({
+            correct:true,
+            title:'Well done!',
+            message:msg,
+            primaryLabel:'Next',
+            onPrimary:()=>{ stopCurrent(false); newRound(); }
+          });
+          // fun flourish
           confettiBurst(matchCard);
-          resultEl.textContent=`Correct! That was a ${answer.name}.`;
+          playAnimalSound(answerId, true).catch(()=>{});
         }else{
           btn.classList.add('incorrect');
-          resultEl.textContent=`Not quite. That was a ${answer.name}.`;
+          const msg=`That was the <b>${answer.name}</b>.<br>Let’s listen again and find it!`;
+          showFeedback({
+            correct:false,
+            title:'Not quite!',
+            message:msg,
+            primaryLabel:'Keep trying',
+            onPrimary:()=>{},
+            secondaryLabel:'Play Sound',
+            onSecondary:()=>{ stopCurrent(false); playAnimalSound(answerId, true).catch(()=>{}); }
+          });
         }
       };
       choicesEl.appendChild(btn);
@@ -299,7 +376,7 @@
     playAnimalSound(answerId /* auto */, false).catch(()=>{});
   }
 
-  /* ============== FEED (with image fallback) ============== */
+  /* ============== FEED (with image fallback + feedback popups) ============== */
   // Emoji fallback per food key
   const FOOD_EMOJI = {
     grass:'🌿', hay:'🟨', grains:'🌾', seeds:'🌰', insects:'🐞', plants:'🌱', leaves:'🍃', veggies:'🥕', oats:'🥣'
@@ -331,10 +408,10 @@
 
     renderFoodChoices(choiceIds, correct, animal);
 
-    // Entrance sequence (restored) → reveals prompt + choices
+    // Entrance sequence (reveals prompt + choices)
     if(feedCard){
       feedCard.classList.remove('entering','focused','show-choices');
-      void feedCard.offsetWidth; // reflow to restart animations
+      void feedCard.offsetWidth;
       feedCard.classList.add('entering');
       setTimeout(()=>feedCard.classList.add('focused'), 520);
       setTimeout(()=>feedCard.classList.add('show-choices'), 820);
@@ -366,14 +443,11 @@
       img.className='food-img';
       img.alt = label;
       img.src = imgPath;
-      let imgOk = true;
       img.onerror = () => {
-        imgOk = false;
         btn.innerHTML = `<div class="food-emoji" aria-hidden="true" style="font-size:2.2rem;line-height:1">${FOOD_EMOJI[fid]||'🍽️'}</div><div>${label}</div>`;
       };
 
       // default content (image + label)
-      btn.innerHTML = '';
       btn.appendChild(img);
       const cap = document.createElement('div'); cap.textContent = label; btn.appendChild(cap);
 
@@ -382,14 +456,29 @@
         stopCurrent(false);
         if(fid===correctId){
           btn.classList.add('correct');
+          const msg = `<b>${animal.name}</b> loves ${label.toLowerCase()}!`;
+          showFeedback({
+            correct:true,
+            title:'Yum!',
+            message:msg,
+            primaryLabel:'Next',
+            onPrimary:()=>{ stopCurrent(false); newFeedRound(); }
+          });
           confettiBurst(feedCard);
-          feedResultEl.textContent=`Yum! ${animal.name} loves ${label}.`;
-          // Optional: replay happy sound
           playAnimalSound(animal.id, true).catch(()=>{});
         }else{
           btn.classList.add('incorrect');
           const correctLabel = FOOD_LABELS[correctId] || correctId;
-          feedResultEl.textContent=`Not quite. ${animal.name} prefers ${correctLabel}.`;
+          const msg = `${label} isn’t the best choice.<br>Try feeding <b>${animal.name}</b> some <b>${correctLabel}</b>!`;
+          showFeedback({
+            correct:false,
+            title:'Not quite!',
+            message:msg,
+            primaryLabel:'Keep trying',
+            onPrimary:()=>{},
+            secondaryLabel:'Play Sound',
+            onSecondary:()=>{ stopCurrent(false); playAnimalSound(animal.id, true).catch(()=>{}); }
+          });
         }
       });
 
@@ -403,7 +492,7 @@
     document.body.classList.remove('route-explore','route-match','route-feed');
     document.body.classList.add('route-home');
     homeEl.classList.remove('hidden');
-    appEl.classList.remove('hidden'); // keep mounted for height/overlay consistency
+    appEl.classList.remove('hidden'); // remain mounted
     sceneEl.classList.add('hidden');
     matchEl.classList.add('hidden');
     feedEl.classList.add('hidden');
