@@ -1,575 +1,651 @@
-/* Farm Friends — v0.4.1-beta
-   - Auto-play prompt sounds in Match & Feed after user interaction
-   - Feed: entrance sequence (walk-in → focus → reveal choices)
-   - Bigger, rounder feedback with confetti on correct
-   - Keeps exclusive audio & cooldown logic
+/* DMToolkit v2.2.1 | app.js (stable build)
+   - 26x26 auto-fit board, fullscreen & pop-out viewer
+   - Maps loaded from assets/maps/index.json (PNG/SVG)
+   - DM Panel: Party/NPCs/Enemies/Notes/Tools
+   - Tools: Environment (trait-aware), Map selector, Quick Dice (incl. d20)
+   - Toasts: top-right, auto-dismiss, close on outside click & when DM panel closes
+   - Dice page: animated “rolling” reveal + big themed SVG
 */
-(() => {
-  const $ = (sel, parent = document) => parent?.querySelector(sel);
 
-  // Elements
-  const appEl   = $('#app');
-  const homeEl  = $('#home');
-  const sceneEl = $('#scene');
-  const matchEl = $('#match');
-  const feedEl  = $('#feed');
-  const btnBack = $('#btn-back');
+/* =========================
+   Grid & Maps
+   ========================= */
+const GRID_COLS = 26;
+const GRID_ROWS = 26;
 
-  // Home buttons
-  const btnExplore = $('#btn-explore');
-  const btnMatch   = $('#btn-match');
-  const btnFeed    = $('#btn-feed');
+// Maps list is loaded from assets/maps/index.json
+let MAPS = []; // replaced by JSON at runtime
+const TRY_FETCH_JSON_INDEX = true;
 
-  // Match controls
-  const playSoundBtn = $('#play-sound');
-  const choicesEl    = $('#choices');
-  const resultEl     = $('#result');
-  const matchCard    = $('.match-card', matchEl);
+/* =========================
+   Environments (trait-aware)
+   ========================= */
+const ENVIRONMENTS = ['Forest','Cavern','Open Field','Urban','Swamp','Desert'];
+const ENV_RULES = {
+  Forest:     { advIfClass:['Rogue'],                    disIfTrait:['Heavy Armor'], advIfTrait:['Stealthy'] },
+  Cavern:     { advIfTrait:['Darkvision','Burrower','Undead'], disIfTrait:['Stealthy'] },
+  'Open Field': { advIfTrait:['Mounted'],                disIfTrait:['Stealthy'] },
+  Urban:      { advIfTrait:['Stealthy'],                 disIfClass:['Enemy'] },
+  Swamp:      { advIfTrait:['Amphibious'],               disIfTrait:['Heavy Armor'] },
+  Desert:     { advIfTrait:['Survivalist'],              disIfTrait:['Heavy Armor'] }
+};
 
-  // Feed controls
-  const feedImg      = $('#feed-img');
-  const feedName     = $('#feed-name');
-  const feedPlayBtn  = $('#feed-play');
-  const foodChoicesEl= $('#food-choices');
-  const feedResultEl = $('#feed-result');
-  const feedCard     = $('.feed-card', feedEl);
+/* =========================
+   State & persistence
+   ========================= */
+const state = load() || {
+  route: 'home',
+  boardBg: null,
+  tokens: {
+    pc: [
+      {id:'p1', name:'Aria',   cls:'Rogue',   traits:['Stealthy','Light Armor'], hp:[10,10], pos:[2,3]},
+      {id:'p2', name:'Bronn',  cls:'Fighter', traits:['Heavy Armor','Brute'],     hp:[13,13], pos:[4,4]},
+    ],
+    npc:   [{id:'n1', name:'Elder Bran', cls:'NPC',   traits:['Civilian'],   hp:[6,6],  pos:[7,6]}],
+    enemy: [{id:'e1', name:'Skeleton A', cls:'Enemy', traits:['Undead','Darkvision'], hp:[13,13], pos:[23,1]}]
+  },
+  selected: null,
+  notes: '',
+  ui: { dmOpen:false, dmTab:'party', environment:null },
+  mapIndex: 0
+};
 
-  // Modal (Explore)
-  const overlay    = $('#overlay');
-  const modalClose = $('#modal-close');
-  const modalImg   = $('#modal-img');
-  const modalPlay  = $('#modal-play');
-  const modalTitle = $('#modal-title');
-  const factType   = $('#fact-type');
-  const factHabitat= $('#fact-habitat');
-  const factDiet   = $('#fact-diet');
-  const factHome   = $('#fact-home');
-  const factFun    = $('#fact-fun');
+function save(){ localStorage.setItem('tp_state_v22_1', JSON.stringify(state)); broadcastState(); }
+function load(){ try{ return JSON.parse(localStorage.getItem('tp_state_v22_1')); }catch(e){ return null; } }
 
-  // State
-  const audioMap = new Map();
-  let currentRound = null;           // Guess the Sound
-  let currentFeed  = null;           // Feed the Animal
-  let lastFocused = null;
-  let currentId = null;
-  let fadeInterval = null;
+/* =========================
+   Cross-window viewer sync
+   ========================= */
+const chan = new BroadcastChannel('board-sync');
+function broadcastState(){ chan.postMessage({type:'state', payload:state}); }
 
-  // User gesture gate (required for reliable mobile autoplay)
-  let userInteracted = false;
+/* =========================
+   Global page wiring
+   ========================= */
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop',     e => e.preventDefault());
 
-  // Cooldowns
-  const LS_RECENT_KEY = 'ff_recent_answers';
-  const LS_FEED_RECENT_KEY = 'ff_feed_recent';
-  const RECENT_SIZE = Math.max(2, Math.min(4, (window.ANIMALS?.length || 8) - 1)); // ~3 by default
-
-  let recentAnswers = loadRecent(LS_RECENT_KEY);
-  let recentFeed    = loadRecent(LS_FEED_RECENT_KEY);
-
-  const getAnimal = (id) => ANIMALS.find(a => a.id === id);
-
-  function loadRecent(key){
-    try {
-      const raw = localStorage.getItem(key);
-      const arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr.slice(0, 8) : [];
-    } catch { return []; }
-  }
-  function updateRecent(key, list, id){
-    const updated = [id, ...list.filter(x => x !== id)].slice(0, RECENT_SIZE);
-    try { localStorage.setItem(key, JSON.stringify(updated)); } catch {}
-    return updated;
-  }
-
-  /* ============== AUDIO (exclusive) ============== */
-  function createAudio(src){
-    const a = new Audio(src);
-    a.preload = 'auto';
-    a.autoplay = false;
-    a.setAttribute('aria-hidden','true');
-    a.volume = 1;
-    return a;
-  }
-  function preloadAudio(){
-    (ANIMALS||[]).forEach(animal=>{
-      if(!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound));
-    });
-  }
-  function fade(audio, from, to, ms, done){
-    if(!audio){ done&&done(); return; }
-    if(fadeInterval) clearInterval(fadeInterval);
-    const steps=10, step=(to-from)/steps, interval=Math.max(10, ms/steps);
-    let i=0; audio.volume=from;
-    fadeInterval=setInterval(()=>{
-      i++; audio.volume=Math.max(0,Math.min(1,from+step*i));
-      if(i>=steps){ clearInterval(fadeInterval); audio.volume=to; done&&done(); }
-    }, interval);
-  }
-  function stopCurrent(smooth=true){
-    if(!currentId) return;
-    const a=audioMap.get(currentId);
-    if(!a){ currentId=null; return; }
-    if(smooth) fade(a, a.volume??1, 0, 120, ()=>{ try{ a.pause(); a.currentTime=0; }catch{} });
-    else { try{ a.pause(); a.currentTime=0; }catch{} }
-    currentId=null;
-  }
-  function playAnimalSound(id, fromUser=false){
-    // We only auto-play after any user interaction has occurred at least once.
-    if(!userInteracted && !fromUser){
-      return Promise.resolve();
-    }
-    const next = audioMap.get(id);
-    if(!next) return Promise.resolve();
-
-    if(currentId === id) stopCurrent(false); else stopCurrent(true);
-
-    try{
-      next.currentTime = 0;
-      next.volume = 0;
-      currentId = id;
-      return next.play()
-        .then(()=>fade(next,0,1,120))
-        .catch(err=>{ throw err; });
-    }catch(e){ return Promise.reject(e); }
-  }
-
-  // Pause audio if app/tab goes to background
-  document.addEventListener('visibilitychange', ()=>{
-    if(document.hidden) stopCurrent(false);
+function nav(route){
+  state.route = route; save();
+  const views = ['home','board','dice','notes'];
+  views.forEach(v=>{
+    const main = document.getElementById('view-'+v);
+    const btn  = document.getElementById('nav-'+v);
+    if(!main||!btn) return;
+    if(v===route){ main.classList.remove('hidden'); btn.classList.add('active'); }
+    else{ main.classList.add('hidden'); btn.classList.remove('active'); }
   });
-
-  /* ============== USER INTERACTION UNLOCK ============== */
-  function markInteracted(){
-    if(userInteracted) return;
-    userInteracted = true;
-
-    // iOS unlock trick (muted) to allow immediate auto-play after navigation
-    const first = audioMap.values().next().value;
-    if(first){
-      const wasMuted = first.muted;
-      try{
-        first.muted = true;
-        first.play().then(()=>first.pause()).finally(()=>{ first.muted = wasMuted; });
-      }catch{ first.muted = wasMuted; }
-    }
-  }
-  ['pointerdown','mousedown','touchstart','keydown'].forEach(evt=>{
-    window.addEventListener(evt, markInteracted, { passive:true, once:false });
-  });
-
-  /* ============== UI FLOURISHES ============== */
-  function menuPuff(btn){
-    if(!btn) return; const puff=document.createElement('div'); puff.className='menu-burst';
-    const rect=btn.getBoundingClientRect(); const w=rect.width,h=rect.height,count=14;
-    for(let i=0;i<count;i++){
-      const s=document.createElement('span'); s.className='menu-spark';
-      const x=Math.random()*w*0.8+w*0.1, y=Math.random()*h*0.6+h*0.2;
-      const tx=(Math.random()-0.5)*140, ty=-(40+Math.random()*90);
-      const size=8+Math.random()*12;
-      s.style.setProperty('--x',Math.round(x)+'px'); s.style.setProperty('--y',Math.round(y)+'px');
-      s.style.setProperty('--tx',Math.round(tx)+'px'); s.style.setProperty('--ty',Math.round(ty)+'px');
-      s.style.setProperty('--sz',Math.round(size)+'px'); s.style.setProperty('--d',(420+Math.random()*280)+'ms');
-      puff.appendChild(s);
-    }
-    btn.appendChild(puff); setTimeout(()=>puff.remove(),720);
-  }
-
-  /* Confetti for correct feedback */
-  function confettiBurst(container){
-    if(!container) return;
-    const layer = document.createElement('div');
-    layer.className = 'confetti';
-    const rect = container.getBoundingClientRect();
-    const w = rect.width, h = rect.height;
-    const count = 22;
-    for(let i=0;i<count;i++){
-      const iEl = document.createElement('i');
-      const x = Math.random()*w*0.9 + w*0.05;
-      const y = Math.random()*h*0.4 + h*0.15;
-      const tx = (Math.random()-0.5)*200;
-      const ty = -(60 + Math.random()*120);
-      const size = 8 + Math.random()*10;
-      const dur = 600 + Math.random()*400;
-      iEl.style.setProperty('--x', Math.round(x)+'px');
-      iEl.style.setProperty('--y', Math.round(y)+'px');
-      iEl.style.setProperty('--tx', Math.round(tx)+'px');
-      iEl.style.setProperty('--ty', Math.round(ty)+'px');
-      iEl.style.setProperty('--sz', Math.round(size)+'px');
-      iEl.style.setProperty('--d', Math.round(dur)+'ms');
-      layer.appendChild(iEl);
-    }
-    container.appendChild(layer);
-    setTimeout(()=>layer.remove(), 1100);
-  }
-
-  /* ============== EXPLORE MODAL ============== */
-  function openModal(animal, triggerEl){
-    if(!animal) return; stopCurrent(false);
-    lastFocused = triggerEl || document.activeElement;
-    document.body.classList.add('modal-open');
-    overlay?.classList.remove('hidden','closing');
-    overlay?.setAttribute('aria-hidden','false');
-
-    if(modalTitle) modalTitle.textContent = animal.name || '';
-    if(modalImg){ modalImg.src = animal.image || ''; modalImg.alt = animal.name || ''; }
-    if(factType)    factType.textContent    = animal.type    || '';
-    if(factHabitat) factHabitat.textContent = animal.habitat || '';
-    if(factDiet)    factDiet.textContent    = animal.diet    || '';
-    if(factHome)    factHome.textContent    = animal.home    || '';
-    if(factFun)     factFun.textContent     = animal.fun     || '';
-
-    if(modalPlay){
-      modalPlay.onclick = ()=>{ stopCurrent(false); playAnimalSound(animal.id, true); };
-      modalPlay.setAttribute('aria-label','Play Sound');
-      modalPlay.innerHTML = btnPlayHTML('Play Sound');
-    }
-
-    // Don’t auto-play on modal open; we keep it to explicit user tap here
-    modalClose?.focus();
-  }
-  function closeModal(){
-    stopCurrent(false);
-    if(!overlay) return;
-    overlay.classList.add('closing');
-    setTimeout(()=>{
-      overlay.classList.add('hidden');
-      overlay.setAttribute('aria-hidden','true');
-      document.body.classList.remove('modal-open');
-      if(lastFocused && lastFocused.focus) lastFocused.focus();
-    },200);
-  }
-
-  /* ============== EXPLORE SCENE ============== */
-  function renderScene(){
-    if(!sceneEl) return; sceneEl.innerHTML='';
-    (ANIMALS||[]).forEach(a=>{
-      const card=document.createElement('button'); card.className='animal';
-      card.style.background = a.color || 'var(--card)'; card.dataset.id=a.id;
-      card.setAttribute('aria-label',`${a.name} — open card`);
-      const img=document.createElement('img'); img.src=a.image; img.alt=a.name;
-      const name=document.createElement('div'); name.className='animal-name'; name.textContent=a.name;
-      card.appendChild(img); card.appendChild(name);
-      card.addEventListener('click', ()=>{
-        markInteracted();
-        card.classList.add('selected'); card.classList.remove('pop'); void card.offsetWidth; card.classList.add('pop');
-        openModal(a, card);
-      });
-      sceneEl.appendChild(card);
-    });
-  }
-
-  /* ============== FEEDBACK POPUP (shared) ============== */
-  let fbOverlayEl;
-  function ensureFeedbackOverlay(){
-    if(fbOverlayEl) return fbOverlayEl;
-    fbOverlayEl=document.createElement('div'); fbOverlayEl.className='feedback-overlay hidden';
-    fbOverlayEl.innerHTML=`
-      <div class="feedback-card" role="dialog" aria-modal="true" aria-live="assertive">
-        <div class="fb-icon" aria-hidden="true"></div>
-        <div class="fb-title" id="fb-title"></div>
-        <div class="fb-message" id="fb-message"></div>
-        <div class="fb-actions">
-          <button id="fb-secondary" class="btn btn-hero btn-lg hidden"></button>
-          <button id="fb-primary" class="btn btn-hero btn-lg"></button>
-        </div>
-      </div>`;
-    document.body.appendChild(fbOverlayEl); return fbOverlayEl;
-  }
-  function showFeedback({correct,title,message,primaryLabel,onPrimary,secondaryLabel,onSecondary}){
-    const el=ensureFeedbackOverlay(); const titleEl=$('#fb-title',el);
-    const msgEl=$('#fb-message',el); const primary=$('#fb-primary',el);
-    const secondary=$('#fb-secondary',el); const card=$('.feedback-card',el);
-    el.classList.remove('hidden'); el.classList.toggle('correct',!!correct); el.classList.toggle('incorrect',!correct);
-    card?.classList.remove('out');
-    if(titleEl) titleEl.textContent = title || (correct?'Well done!':'Nice try!');
-    if(msgEl)   msgEl.innerHTML    = message || '';
-    if(primary){ primary.textContent = primaryLabel || (correct?'Next':'OK'); primary.onclick=()=>{ onPrimary&&onPrimary(); hideFeedback(); }; }
-    if(secondaryLabel && secondary){
-      secondary.classList.remove('hidden'); secondary.textContent=secondaryLabel;
-      secondary.onclick=()=>{ onSecondary&&onSecondary(); hideFeedback(false); };
-    }else if(secondary){ secondary.classList.add('hidden'); secondary.onclick=null; }
-
-    if(correct) confettiBurst(card);
-    setTimeout(()=>primary?.focus(),10);
-  }
-  function hideFeedback(animateOut=true){
-    if(!fbOverlayEl) return; const card=$('.feedback-card',fbOverlayEl);
-    if(animateOut){ card?.classList.add('out'); setTimeout(()=>fbOverlayEl.classList.add('hidden'),200); }
-    else fbOverlayEl.classList.add('hidden');
-  }
-
-  /* ============== GUESS THE SOUND ============== */
-  function randInt(n){ return Math.floor(Math.random()*n); }
-  function sample(arr,count){ const copy=arr.slice(); const out=[]; while(copy.length && out.length<count){ out.push(copy.splice(randInt(copy.length),1)[0]); } return out; }
-  function shuffle(arr){ const copy=arr.slice(); for(let i=copy.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); const t=copy[i]; copy[i]=copy[j]; copy[j]=t; } return copy; }
-
-  function chooseAnswer(pool, avoid){
-    const notRecent = pool.filter(a => !avoid.includes(a.id));
-    if(notRecent.length > 0) return notRecent[randInt(notRecent.length)];
-    return pool[randInt(pool.length)];
-  }
-
-  function animateMatchSwap(cb){
-    if(!matchCard){ cb&&cb(); return; }
-    matchCard.classList.add('swap-out');
-    setTimeout(()=>{
-      cb&&cb();
-      matchCard.classList.remove('swap-out');
-      matchCard.classList.add('swap-in');
-      setTimeout(()=>matchCard.classList.remove('swap-in'),200);
-    },200);
-  }
-
-  function btnPlayHTML(label='Play Sound'){ return `
-    <span class="btn-ico" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
-        <path d="M8 5v14l11-7z"></path>
-      </svg>
-    </span>
-    <span class="btn-label">${label}</span>`; }
-
-  function newRound(){
-    stopCurrent(false); if(resultEl) resultEl.textContent='';
-
-    const choicesCount=Math.min(3,(ANIMALS||[]).length);
-    const pool=sample(ANIMALS, choicesCount);
-    const answer=chooseAnswer(pool, recentAnswers);
-    currentRound={ answerId: answer.id, choiceIds: pool.map(a=>a.id) };
-
-    renderChoices(pool);
-
-    // Auto-play the clue (after user has interacted once)
-    setTimeout(()=>{
-      if(playSoundBtn){
-        playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
-        playSoundBtn.setAttribute('aria-label','Play Sound');
-      }
-      if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.';
-      if(userInteracted){
-        playAnimalSound(answer.id /* auto */, false).catch(()=>{});
-      }
-      // cooldown record
-      recentAnswers = updateRecent(LS_RECENT_KEY, recentAnswers, answer.id);
-    }, 180);
-  }
-
-  function renderChoices(animals){
-    if(!choicesEl) return; choicesEl.innerHTML='';
-    shuffle(animals).forEach(a=>{
-      const btn=document.createElement('button'); btn.className='choice'; btn.setAttribute('aria-label',a.name); btn.dataset.id=a.id;
-      const img=document.createElement('img'); img.src=a.image; img.alt=a.name; btn.appendChild(img);
-      btn.addEventListener('click', ()=>{
-        markInteracted();
-        const answer = getAnimal(currentRound?.answerId); if(!answer) return;
-        stopCurrent(false);
-        if(a.id===answer.id){
-          btn.classList.add('correct'); playAnimalSound(answer.id, true).catch(()=>{});
-          const msg=`You chose the <b>${answer.name}</b> — great listening! ${answer.fun}`;
-          showFeedback({ correct:true, title:'Well done!', message:msg, primaryLabel:'Next',
-            onPrimary:()=>{ stopCurrent(false); animateMatchSwap(()=>newRound()); } });
-        }else{
-          btn.classList.add('incorrect');
-          const msg=`That was the <b>${a.name}</b> — ${a.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
-          showFeedback({
-            correct:false, title:'Not quite!', message:msg, primaryLabel:'Keep guessing', onPrimary:()=>{},
-            secondaryLabel:'Play Sound', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id, true).catch(()=>{}); }
-          });
-        }
-      });
-      choicesEl.appendChild(btn);
-    });
-  }
-
-  function playCurrentPrompt(){
-    if(!currentRound) return;
-    markInteracted();
-    stopCurrent(false);
-    playAnimalSound(currentRound.answerId, true).catch(()=>{ if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.'; });
-    if(playSoundBtn){
-      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
-      playSoundBtn.setAttribute('aria-label','Play Sound');
-    }
-  }
-
-  /* ============== FEED THE ANIMAL ============== */
-  function newFeedRound(){
-    stopCurrent(false);
-    if(feedResultEl) feedResultEl.textContent='';
-
-    // pick an animal avoiding recentFeed
-    const pool = ANIMALS.slice();
-    const animal = chooseAnswer(pool, recentFeed);
-
-    currentFeed = { animalId: animal.id };
-    if(feedImg){ feedImg.src = animal.image; feedImg.alt = animal.name; }
-    if(feedName){ feedName.textContent = animal.name; }
-
-    // Build food choices: correct + 2 decoys
-    const correctId = animal.food;
-    const allFood = (window.FOOD_DECOYS || Object.keys(window.FOOD || {}));
-    const decoyPool = allFood.filter(id => id !== correctId);
-    const decoys = shuffle(decoyPool).slice(0,2);
-    const choiceIds = shuffle([correctId, ...decoys]);
-
-    renderFoodChoices(choiceIds, correctId, animal);
-
-    // Entrance sequence
-    if(feedCard){
-      feedCard.classList.remove('entering','focused','show-choices');
-      // 1) Walk in
-      void feedCard.offsetWidth;
-      feedCard.classList.add('entering');
-      // 2) Focus bump
-      setTimeout(()=>feedCard.classList.add('focused'), 520);
-      // 3) Reveal prompt and choices
-      setTimeout(()=>feedCard.classList.add('show-choices'), 820);
-    }
-
-    // Auto-play animal sound after entrance if user has interacted
-    setTimeout(()=>{
-      if(userInteracted){
-        playAnimalSound(animal.id /* auto */, false).catch(()=>{});
-      }
-    }, 880);
-
-    // cooldown record
-    recentFeed = updateRecent(LS_FEED_RECENT_KEY, recentFeed, animal.id);
-  }
-
-  function renderFoodChoices(ids, correctId, animal){
-  if(!foodChoicesEl) return; 
-  foodChoicesEl.innerHTML='';
-
-  ids.forEach(fid=>{
-    const imgPath = `assets/img/animal-food/${fid}food.png`;
-    const label = fid.charAt(0).toUpperCase() + fid.slice(1);
-
-    const btn = document.createElement('button');
-    btn.className = 'food-choice';
-    btn.setAttribute('aria-label', label);
-    btn.innerHTML = `<img src="${imgPath}" alt="${label}" class="food-img"><div>${label}</div>`;
-
-    btn.addEventListener('click', ()=>{
-      markInteracted();
-      stopCurrent(false);
-
-      if(fid === correctId){
-        btn.classList.add('correct');
-        playAnimalSound(animal.id, true).catch(()=>{});
-        const msg = `<b>${animal.name}</b> loves ${label.toLowerCase()}!`;
-        showFeedback({
-          correct:true, title:'Yum!', message:msg, primaryLabel:'Next',
-          onPrimary:()=>{ stopCurrent(false); newFeedRound(); }
-        });
-      } else {
-        btn.classList.add('incorrect');
-        const correctLabel = correctId.charAt(0).toUpperCase() + correctId.slice(1);
-        const msg = `${label} isn’t right.<br>Try feeding <b>${animal.name}</b> some <b>${correctLabel}</b>!`;
-        showFeedback({
-          correct:false, title:'Not quite!', message:msg,
-          primaryLabel:'Keep trying', onPrimary:()=>{},
-          secondaryLabel:'Play Sound', onSecondary:()=>{ stopCurrent(false); playAnimalSound(animal.id, true).catch(()=>{}); }
-        });
-      }
-    });
-
-    foodChoicesEl.appendChild(btn);
-  });
+  render();
 }
 
+/* =========================
+   Board sizing/fit
+   ========================= */
+const boardEl = () => document.getElementById('board');
 
-  /* ============== ROUTING ============== */
-  function setRoute(route){
-    document.body.classList.remove('route-home','route-explore','route-match','route-feed');
-    document.body.classList.add(route);
-  }
-  function showHome(){
-    closeModal(); stopCurrent(false);
-    setRoute('route-home');
-    appEl?.classList.remove('hidden');
-    homeEl?.classList.remove('hidden');
-    sceneEl?.classList.add('hidden');
-    matchEl?.classList.add('hidden');
-    feedEl ?.classList.add('hidden');
-    btnBack?.classList.add('hidden');
-  }
-  function showExplore(){
-    stopCurrent(false);
-    setRoute('route-explore');
-    homeEl?.classList.add('hidden');
-    matchEl?.classList.add('hidden');
-    feedEl ?.classList.add('hidden');
-    sceneEl?.classList.remove('hidden');
-    btnBack?.classList.remove('hidden');
-  }
-  function showMatch(){
-    stopCurrent(false);
-    setRoute('route-match');
-    homeEl?.classList.add('hidden');
-    sceneEl?.classList.add('hidden');
-    feedEl ?.classList.add('hidden');
-    matchEl?.classList.remove('hidden');
-    btnBack?.classList.remove('hidden');
-    if(playSoundBtn){
-      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
-      playSoundBtn.setAttribute('aria-label','Play Sound');
-    }
-    // Fresh round + (auto-play after render if user interacted)
-    newRound();
-  }
-  function showFeed(){
-    stopCurrent(false);
-    setRoute('route-feed');
-    homeEl?.classList.add('hidden');
-    sceneEl?.classList.add('hidden');
-    matchEl?.classList.add('hidden');
-    feedEl ?.classList.remove('hidden');
-    btnBack?.classList.remove('hidden');
-    newFeedRound();
-  }
+function fitBoard(){
+  const el = boardEl(); if(!el) return;
+  const vpH = Math.min(window.innerHeight, (window.visualViewport?.height || window.innerHeight));
+  const vpW = Math.min(window.innerWidth,  (window.visualViewport?.width  || window.innerWidth));
+  const SAFE_H_PAD = 140, SAFE_W_PAD = 24;
+  const availH = Math.max(240, vpH - SAFE_H_PAD);
+  const availW = Math.max(240, vpW - SAFE_W_PAD);
+  const maxSquare = Math.floor(Math.min(availW, availH));
+  const grid = Math.max(GRID_COLS, GRID_ROWS);
+  const cell = Math.max(16, Math.floor(maxSquare / grid));
+  const boardSize = cell * grid;
+  el.style.setProperty('--cell', cell + 'px');
+  el.style.setProperty('--boardSize', boardSize + 'px');
+}
+window.addEventListener('resize', ()=>{ fitBoard(); renderBoard(); });
+document.addEventListener('fullscreenchange', ()=>{ fitBoard(); renderBoard(); });
 
-  /* ============== INIT ============== */
-  function init(){
-    overlay?.classList.add('hidden'); document.body.classList.remove('modal-open');
-    preloadAudio(); renderScene();
-    showHome();
+function cellsz(){
+  const cs = getComputedStyle(boardEl()).getPropertyValue('--cell').trim();
+  return parseInt(cs.replace('px','')) || 42;
+}
 
-    // Home buttons + delegated fallback
-    btnExplore?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnExplore); setTimeout(showExplore,120); });
-    btnMatch  ?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnMatch);   setTimeout(showMatch,120); });
-    btnFeed   ?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnFeed);    setTimeout(showFeed,120); });
+/* =========================
+   Board interactions
+   ========================= */
+function boardClick(ev){
+  const el = boardEl(); if(!el) return;
+  const rect = el.getBoundingClientRect();
+  const x = Math.max(0, Math.min(GRID_COLS-1, Math.floor((ev.clientX - rect.left) / cellsz())));
+  const y = Math.max(0, Math.min(GRID_ROWS-1, Math.floor((ev.clientY - rect.top)  / cellsz())));
+  if(!state.selected) return;
+  const list = state.tokens[state.selected.kind];
+  const t = list.find(z=>z.id===state.selected.id);
+  if(!t) return;
+  t.pos = [x,y];
+  save(); renderBoard();
+}
 
-    document.addEventListener('click', (e)=>{
-      const t=e.target.closest?.('#btn-explore,#btn-match,#btn-feed,#btn-back');
-      if(!t) return; e.preventDefault();
-      if(t.id==='btn-explore'){ markInteracted(); menuPuff(t); setTimeout(showExplore,100); }
-      else if(t.id==='btn-match'){ markInteracted(); menuPuff(t); setTimeout(showMatch,100); }
-      else if(t.id==='btn-feed'){  markInteracted(); menuPuff(t); setTimeout(showFeed,100); }
-      else if(t.id==='btn-back'){ showHome(); }
+function selectTokenDom(kind,id){
+  state.selected = {kind,id}; save(); renderBoard();
+}
+
+/* =========================
+   Board rendering
+   ========================= */
+function renderBoard(){
+  const el = boardEl(); if(!el) return;
+  fitBoard();
+  el.style.backgroundImage = state.boardBg ? `url("${state.boardBg}")` : 'linear-gradient(#1b2436,#0f1524)';
+  const size = cellsz();
+  el.innerHTML = '';
+  ['pc','npc','enemy'].forEach(kind=>{
+    (state.tokens[kind] || []).forEach(t=>{
+      const tok = document.createElement('div');
+      tok.className = `token ${kind}` + (state.selected && state.selected.id===t.id && state.selected.kind===kind ? ' selected':'');
+      tok.dataset.id = t.id; tok.dataset.kind = kind; tok.title = t.name;
+      tok.style.left = (t.pos[0]*size + 2) + 'px';
+      tok.style.top  = (t.pos[1]*size + 2) + 'px';
+      tok.style.width = (size-6) + 'px';
+      tok.style.height= (size-6) + 'px';
+      tok.onclick = (e)=>{ e.stopPropagation(); selectTokenDom(kind,t.id); };
+      const img = document.createElement('img');
+      img.loading='lazy'; img.src = `assets/class_icons/${t.cls}.svg`;
+      tok.appendChild(img); el.appendChild(tok);
     });
+  });
+  updateDmFab();
+}
 
-    // Back
-    btnBack?.addEventListener('click', (e)=>{ e.preventDefault(); showHome(); });
+/* =========================
+   Fullscreen & pop-out
+   ========================= */
+function toggleBoardFullscreen(){
+  const el = boardEl(); if(!el) return;
+  if(!document.fullscreenElement){ el.requestFullscreen?.(); }
+  else { document.exitFullscreen?.(); }
+}
 
-    // Match controls
-    if(playSoundBtn){
-      playSoundBtn.classList.add('btn','btn-hero','btn-lg');
-      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
-      playSoundBtn.setAttribute('aria-label','Play Sound');
-      playSoundBtn.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); playCurrentPrompt(); });
-    }
+let viewerWin = null;
+function openBoardViewer(){
+  if(viewerWin && !viewerWin.closed){ viewerWin.focus(); broadcastState(); return; }
+  viewerWin = window.open('', 'BoardViewer', 'width=900,height=900');
+  if(!viewerWin) return;
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Board Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root{ --cell: 42px; --boardSize: 546px; }
+  html,body{ height:100%; margin:0; background:#0f1115; color:#e6e9f2; font:14px system-ui,Segoe UI,Roboto,Arial }
+  .board{ position:relative; width:var(--boardSize); height:var(--boardSize); margin:20px auto;
+    border:1px solid #23283a; border-radius:12px; overflow:hidden; background:#0f141f; background-size:cover; background-position:center; }
+  .board::after{ content:""; position:absolute; inset:0;
+     background-image:linear-gradient(to right,rgba(255,255,255,.06) 1px,transparent 1px),
+                      linear-gradient(to bottom,rgba(255,255,255,.06) 1px,transparent 1px);
+     background-size: var(--cell) var(--cell); pointer-events:none; }
+  .token{ position:absolute; border-radius:6px; border:2px solid rgba(255,255,255,.25); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#0f1115 }
+  .token img{ width:100%; height:100%; object-fit:contain; }
+  .pc{ background:#0ea5e9aa } .npc{ background:#22c55eaa } .enemy{ background:#ef4444aa }
+</style>
+</head><body>
+  <div id="viewerBoard" class="board"></div>
+<script>
+  const GRID_COLS=${GRID_COLS}, GRID_ROWS=${GRID_ROWS};
+  const chan = new BroadcastChannel('board-sync');
+  chan.onmessage = (e)=>{ if(!e?.data) return; if(e.data.type==='state'){ window.__STATE = e.data.payload; renderViewer(); } };
+  window.addEventListener('resize', fit);
+  function fit(){
+    const el = document.getElementById('viewerBoard');
+    const vpH = Math.min(window.innerHeight, (window.visualViewport?.height || window.innerHeight));
+    const vpW = Math.min(window.innerWidth,  (window.visualViewport?.width  || window.innerWidth));
+    const avail = Math.min(vpW-40, vpH-40);
+    const grid = Math.max(GRID_COLS, GRID_ROWS);
+    const cell = Math.max(14, Math.floor(avail / grid));
+    const size = cell * grid;
+    el.style.setProperty('--cell', cell+'px');
+    el.style.setProperty('--boardSize', size+'px');
+  }
+  function renderViewer(){
+    const s = window.__STATE; if(!s) return;
+    const el = document.getElementById('viewerBoard'); if(!el) return;
+    fit();
+    el.style.backgroundImage = s.boardBg ? 'url('+JSON.stringify(s.boardBg)+')' : 'linear-gradient(#1b2436,#0f1524)';
+    const cell = parseInt(getComputedStyle(el).getPropertyValue('--cell'))||42;
+    el.innerHTML = '';
+    ['pc','npc','enemy'].forEach(kind=>{
+      (s.tokens[kind]||[]).forEach(t=>{
+        const d = document.createElement('div');
+        d.className = 'token '+kind;
+        d.style.left = (t.pos[0]*cell + 2) + 'px';
+        d.style.top  = (t.pos[1]*cell + 2) + 'px';
+        d.style.width = (cell-6) + 'px';
+        d.style.height= (cell-6) + 'px';
+        const img = document.createElement('img'); img.src='assets/class_icons/'+t.cls+'.svg'; img.loading='lazy';
+        d.appendChild(img); el.appendChild(d);
+      });
+    });
+  }
+  chan.postMessage({type:'ping'});
+</script></body></html>`;
+  viewerWin.document.open(); viewerWin.document.write(html); viewerWin.document.close();
+  chan.onmessage = (e)=>{ if(e?.data?.type==='ping'){ broadcastState(); } };
+  broadcastState();
+}
 
-    // Feed controls
-    feedPlayBtn?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); if(!currentFeed) return; const a=getAnimal(currentFeed.animalId); if(!a) return; stopCurrent(false); playAnimalSound(a.id, true).catch(()=>{}); });
+/* =========================
+   DM Panel
+   ========================= */
+function maximizeDmPanel(){
+  state.ui.dmOpen = true; save(); renderDmPanel(); updateDmFab();
+}
+function minimizeDmPanel(){
+  state.ui.dmOpen = false; save(); renderDmPanel(); updateDmFab();
+  closeAllToasts();
+}
+function toggleDmPanel(){
+  state.ui.dmOpen = !state.ui.dmOpen; save(); renderDmPanel(); updateDmFab();
+  if(!state.ui.dmOpen) closeAllToasts();
+}
+document.addEventListener('keydown', (e)=>{ if(e.shiftKey && (e.key==='D'||e.key==='d')){ e.preventDefault(); toggleDmPanel(); } });
 
-    // Modal
-    modalClose?.addEventListener('click', (e)=>{ e.preventDefault(); closeModal(); });
-    overlay?.addEventListener('click', (e)=>{ if(e.target===overlay) closeModal(); });
-    document.addEventListener('keydown', (e)=>{ if(e.key==='Escape' && !overlay?.classList.contains('hidden')) closeModal(); });
+function updateDmFab(){
+  const fab = document.getElementById('dm-fab');
+  const count = document.getElementById('dm-fab-count');
+  if(!fab||!count) return;
+  const total = (state.tokens.pc?.length||0)+(state.tokens.npc?.length||0)+(state.tokens.enemy?.length||0);
+  count.textContent = total;
+  fab.classList.remove('hidden');
+}
 
-    // iOS audio unlock (muted)
-    window.addEventListener('touchstart', markInteracted, { once:true, passive:true });
+function dmTabButton(id,label,active){ return `<button class="dm-tab ${active?'active':''}" onclick="setDmTab('${id}')">${label}</button>`; }
+function setDmTab(id){ state.ui.dmTab=id; save(); renderDmPanel(); }
+
+function tokenCard(kind,t){
+  const sel = state.selected && state.selected.kind===kind && state.selected.id===t.id;
+  return `
+    <div class="dm-character-box">
+      <div class="dm-card ${sel?'selected':''}" onclick="selectFromPanel('${kind}','${t.id}')">
+        <div class="avatar"><img src="assets/class_icons/${t.cls}.svg" alt=""></div>
+        <div class="name">${escapeHtml(t.name)}</div>
+        <div class="badges">
+          <span class="badge">${escapeHtml(t.cls)}</span>
+          <span class="badge">HP ${t.hp[0]}/${t.hp[1]}</span>
+          ${(Array.isArray(t.traits)?t.traits:[]).map(x=>`<span class="badge">${escapeHtml(x)}</span>`).join('')}
+        </div>
+      </div>
+      <div class="dm-actions">
+        <button class="dm-title-btn short adv" title="Advantage" onclick="quickAdvFor('${kind}','${t.id}')">A</button>
+        <button class="dm-title-btn short dis" title="Disadvantage" onclick="quickDisFor('${kind}','${t.id}')">D</button>
+      </div>
+    </div>`;
+}
+
+function selectFromPanel(kind,id){ state.selected = {kind,id}; save(); renderDmPanel(); if(state.route!=='board') nav('board'); else renderBoard(); }
+
+function setEnvironment(env){
+  state.ui.environment = env; save();
+  renderDmPanel();
+}
+
+function computeEnvironmentEffects(){
+  const env = state.ui.environment;
+  if(!env) return { lines:[], adv:[], dis:[] };
+  const rule = ENV_RULES[env] || {};
+  const aClass = new Set(rule.advIfClass || []);
+  const dClass = new Set(rule.disIfClass || []);
+  const aTrait = new Set(rule.advIfTrait || []);
+  const dTrait = new Set(rule.disIfTrait || []);
+
+  const all = ['pc','npc','enemy'].flatMap(k => (state.tokens[k]||[]).map(t=>({...t, kind:k})));
+  const lines = all.map(t=>{
+    const cls = t.cls || '';
+    const traits = Array.isArray(t.traits) ? t.traits : [];
+    const hasAdvClass = aClass.has(cls);
+    const hasDisClass = dClass.has(cls);
+    const hasAdvTrait = traits.some(tr => aTrait.has(tr));
+    const hasDisTrait = traits.some(tr => dTrait.has(tr));
+    const adv = hasAdvClass || hasAdvTrait;
+    const dis = hasDisClass || hasDisTrait;
+
+    if(adv && !dis) return `${t.name} (${cls}): Advantage`;
+    if(dis && !adv) return `${t.name} (${cls}): Disadvantage`;
+    if(adv && dis)  return `${t.name} (${cls}): Mixed (check DM ruling)`;
+    return `${t.name} (${cls}): —`;
+  });
+
+  const advIds = [];
+  const disIds = [];
+  all.forEach(t=>{
+    const cls = t.cls || '';
+    const traits = Array.isArray(t.traits) ? t.traits : [];
+    const adv = aClass.has(cls) || traits.some(tr => aTrait.has(tr));
+    const dis = dClass.has(cls) || traits.some(tr => dTrait.has(tr));
+    if(adv && !dis) advIds.push(t.id);
+    if(dis && !adv) disIds.push(t.id);
+  });
+
+  return { lines, adv: advIds, dis: disIds };
+}
+
+function renderDmPanel(){
+  const panel=document.getElementById('dm-panel'); if(!panel) return;
+  if(!state.ui.dmOpen){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+
+  const pcs = state.tokens.pc||[];
+  const npcs= state.tokens.npc||[];
+  const enemies = state.tokens.enemy||[];
+  const tab= state.ui.dmTab||'party';
+
+  const tabsHtml=`<div class="dm-tabs">
+    ${dmTabButton('party','Party',tab==='party')}
+    ${dmTabButton('npcs','NPCs',tab==='npcs')}
+    ${dmTabButton('enemies','Enemies',tab==='enemies')}
+    ${dmTabButton('notes','Notes',tab==='notes')}
+    ${dmTabButton('tools','Tools',tab==='tools')}
+  </div>`;
+
+  let body='';
+  if(tab==='party'){ body+=`<div class="dm-grid3">${pcs.map(p=>tokenCard('pc',p)).join('')||'<div class="small">No PCs yet.</div>'}</div>`; }
+  if(tab==='npcs'){ body+=`<div class="dm-grid3">${npcs.map(n=>tokenCard('npc',n)).join('')||'<div class="small">No NPCs yet.</div>'}</div>`; }
+  if(tab==='enemies'){ body+=`<div class="dm-grid3">${enemies.map(e=>tokenCard('enemy',e)).join('')||'<div class="small">No Enemies yet.</div>'}</div>`; }
+
+  if(tab==='notes'){
+    body+=`
+      <div class="dm-section">
+        <div class="dm-sec-head"><span>DM Notes</span></div>
+        <textarea id="dm-notes" rows="8" style="width:100%">${escapeHtml(state.notes||'')}</textarea>
+      </div>`;
   }
 
-  document.addEventListener('DOMContentLoaded', init);
-  window.addEventListener('load', init);
-})();
+  if(tab==='tools'){
+    const env = state.ui.environment;
+    const effects = computeEnvironmentEffects();
+
+    const mapButtons = (MAPS||[]).map((m,i)=>`
+      <button class="map-pill ${state.mapIndex===i?'active':''}" onclick="setMapByIndex(${i})">${escapeHtml(m.name || (m.src.split('/').pop()))}</button>
+    `).join('');
+
+    const quickRow = `
+      <div class="quick-dice-row">
+        ${['d4','d6','d8','d10','d12','d20'].map(s=>`
+          <button class="quick-die-btn" onclick="rollQuick('${s}')">
+            <span class="die-icon">${polyIcon(s)}</span>${s.toUpperCase()}
+          </button>`).join('')}
+      </div>`;
+
+    body+=`
+      <div class="dm-section">
+        <div class="dm-sec-head"><span>Environment / Terrain</span></div>
+        <div class="env-grid">
+          ${ENVIRONMENTS.map(e=>`<div class="env-pill ${env===e?'active':''}" onclick="setEnvironment('${e}')">${e}</div>`).join('')}
+        </div>
+        <div class="dm-detail" style="margin-top:8px">
+          ${env ? `<strong>Selected:</strong> ${env}` : 'Select an environment to see advantages/disadvantages.'}
+          ${effects.lines.length ? `<div style="margin-top:6px">${effects.lines.map(l=>`• ${escapeHtml(l)}`).join('<br>')}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="dm-section" style="margin-top:10px">
+        <div class="dm-sec-head"><span>Maps</span></div>
+        <div class="map-list">
+          ${mapButtons || '<div class="small">No maps yet. Add PNG/SVG files and rebuild assets/maps/index.json.</div>'}
+        </div>
+        <div class="dm-detail" style="margin-top:8px">
+          Current map: ${state.boardBg ? escapeHtml(MAPS[state.mapIndex]?.name || MAPS[state.mapIndex]?.src || 'Loaded') : 'None'}
+          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn tiny" onclick="clearMap()">Clear Map</button>
+            <button class="btn tiny" onclick="reloadMaps()">Reload Maps</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="dm-section" style="margin-top:10px">
+        <div class="dm-sec-head"><span>Quick Dice</span></div>
+        ${quickRow}
+        <div class="dm-quick-bar">
+          <button class="dm-title-btn big" onclick="quickD20()">Roll d20</button>
+          <div id="dm-last-roll" class="dm-detail">—</div>
+        </div>
+      </div>`;
+  }
+
+  panel.innerHTML = `
+    <div class="dm-head">
+      <h3>DM Panel</h3>
+      <div><button class="btn tiny" onclick="minimizeDmPanel()">Close</button></div>
+    </div>
+    ${tabsHtml}
+    ${body}
+  `;
+
+  const notesEl=document.getElementById('dm-notes');
+  if(notesEl){
+    notesEl.addEventListener('input', ()=>{
+      state.notes=notesEl.value; save();
+      const n=document.getElementById('notes'); if(n) n.value=state.notes;
+    });
+  }
+}
+
+function clearMap(){ state.boardBg=null; save(); renderBoard(); }
+
+/* =========================
+   Toasts (top-right)
+   ========================= */
+let activeToast = null;
+function closeAllToasts(){
+  document.querySelectorAll('.dm-toast').forEach(t=>t.remove());
+  activeToast = null;
+}
+function showToast(title,msg,hint){
+  closeAllToasts();
+  const div=document.createElement('div');
+  div.className='dm-toast fade';
+  div.innerHTML=`
+    <div class="close" onclick="this.parentElement.remove()">×</div>
+    <h4>${escapeHtml(title)}</h4>
+    <div>${escapeHtml(msg)}</div>
+    ${hint ? `<div class="hint">${escapeHtml(hint)}</div>` : ``}
+  `;
+  document.body.appendChild(div);
+  activeToast = div;
+  setTimeout(()=>{ if(div===activeToast){ div.remove(); activeToast=null; } }, 4500);
+}
+document.addEventListener('click', (e)=>{
+  if(!activeToast) return;
+  const insideToast = activeToast.contains(e.target);
+  const insidePanel = document.getElementById('dm-panel')?.contains(e.target);
+  if(!insideToast && !insidePanel){ closeAllToasts(); }
+});
+
+/* =========================
+   Quick dice (DM Tools) + d20 helper
+   ========================= */
+function quickD20(){
+  const v=1+Math.floor(Math.random()*20);
+  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`d20 → ${v}`;
+  showToast('Quick d20', `→ ${v}`, 'Instruction: roll 1d20; apply modifiers as usual.');
+}
+function quickAdvFor(kind,id){
+  const a=1+Math.floor(Math.random()*20), b=1+Math.floor(Math.random()*20), res=Math.max(a,b);
+  const list=state.tokens[kind]||[]; const name=(list.find(x=>x.id===id)?.name)||kind.toUpperCase();
+  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`Adv: ${a} vs ${b} ⇒ ${res}`;
+  showToast(name, `Advantage → ${res} (${a} vs ${b})`, 'Instruction: roll 2d20, keep highest; then add relevant modifiers.');
+}
+function quickDisFor(kind,id){
+  const a=1+Math.floor(Math.random()*20), b=1+Math.floor(Math.random()*20), res=Math.min(a,b);
+  const list=state.tokens[kind]||[]; const name=(list.find(x=>x.id===id)?.name)||kind.toUpperCase();
+  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`Dis: ${a} vs ${b} ⇒ ${res}`;
+  showToast(name, `Disadvantage → ${res} (${a} vs ${b})`, 'Instruction: roll 2d20, keep lowest; then add relevant modifiers.');
+}
+function rollQuick(tag){
+  const n=parseInt(tag.replace('d',''),10)||6;
+  const v=1+Math.floor(Math.random()*n);
+  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`${tag.toUpperCase()} → ${v}`;
+  showToast('Quick Dice', `${tag.toUpperCase()} → ${v}`, 'Instruction: roll the selected die; apply modifiers as needed.');
+}
+
+/* =========================
+   Dice page
+   ========================= */
+const dice=['d4','d6','d8','d10','d12','d20']; let selectedDice=[];
+
+function renderDiceButtons(){
+  const row=document.getElementById('dice-buttons'); if(!row) return;
+  row.innerHTML=dice.map(s=>`
+    <button class="die-btn" onclick="addDie('${s}')">
+      <span class="die-icon">${polyIcon(s)}</span>${s.toUpperCase()}
+    </button>`).join('');
+}
+function addDie(s){ selectedDice.push(s); updateDiceSelection(); shakeOutput(); }
+function clearDice(){
+  selectedDice=[]; updateDiceSelection();
+  const out=document.getElementById('dice-output');
+  out.innerHTML = `
+    <div class="roll-card">
+      <div class="dice-hero">${bigDiceSvg()}</div>
+      <div class="roll-status">Select dice and tap Roll</div>
+    </div>
+  `;
+}
+function updateDiceSelection(){
+  const el=document.getElementById('dice-selection'); if(!el) return;
+  el.textContent= selectedDice.length? selectedDice.join(' + '):'No dice selected';
+}
+function rollAll(){
+  if(!selectedDice.length) return;
+
+  const out = document.getElementById('dice-output');
+  out.innerHTML = `
+    <div class="roll-card rolling">
+      <div class="dice-hero">${bigDiceSvg()}</div>
+      <div class="roll-status">Rolling…</div>
+    </div>
+  `;
+
+  setTimeout(()=>{
+    const rolls = selectedDice.map(tag=>roll(tag));
+    const total = rolls.reduce((a,b)=>a+b,0);
+    out.innerHTML = `
+      <div class="roll-card">
+        <div class="dice-hero">${bigDiceSvg()}</div>
+        <div class="roll-total">Total: ${total}</div>
+        <div class="roll-breakdown">${selectedDice.map((s,i)=>`${s} [${rolls[i]}]`).join(' + ')}</div>
+      </div>
+    `;
+    selectedDice=[]; updateDiceSelection();
+  }, 900);
+}
+function roll(tag){ const n=parseInt(tag.replace('d',''),10)||6; return 1+Math.floor(Math.random()*n); }
+function shakeOutput(){ const out=document.getElementById('dice-output'); out.classList.remove('shake'); void out.offsetWidth; out.classList.add('shake'); }
+
+/* Themed dice SVG for hero */
+function bigDiceSvg(){
+  return `
+  <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"  stop-color="#2a3760"/>
+        <stop offset="100%" stop-color="#121a2e"/>
+      </linearGradient>
+    </defs>
+    <polygon points="32,4 53,10 60,31 50,52 32,60 14,52 4,31 11,10"
+      fill="url(#g1)" stroke="currentColor" stroke-width="2" />
+    <polygon points="32,4 53,10 32,32 11,10"
+      fill="none" stroke="currentColor" stroke-opacity=".5" />
+    <polygon points="32,60 50,52 32,32 14,52"
+      fill="none" stroke="currentColor" stroke-opacity=".5" />
+    <polygon points="4,31 32,32 60,31"
+      fill="none" stroke="currentColor" stroke-opacity=".45" />
+  </svg>`;
+}
+
+/* Small poly icon used on buttons */
+function polyIcon(s){
+  const map={d4:3,d6:4,d8:6,d10:7,d12:8,d20:10};
+  const sides=map[s]||6;
+  return `<svg width="26" height="26" viewBox="0 0 24 24" fill="none">
+    <polygon points="${regularPoly(12,12,9,sides)}" stroke="currentColor" stroke-width="2" fill="none"/>
+  </svg>`;
+}
+function regularPoly(cx,cy,r,n){
+  const pts=[];
+  for(let i=0;i<n;i++){
+    const a=(Math.PI*2*(i/n))-Math.PI/2;
+    pts.push((cx+r*Math.cos(a)).toFixed(1)+','+(cy+r*Math.sin(a)).toFixed(1));
+  }
+  return pts.join(' ');
+}
+
+/* =========================
+   Utils & boot
+   ========================= */
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function render(){
+  if(state.route==='board'){ renderBoard(); }
+  if(state.route==='dice'){ renderDiceButtons(); updateDiceSelection(); }
+  const notes=document.getElementById('notes'); if(notes) notes.value=state.notes||'';
+  updateDmFab();
+  renderDmPanel();
+}
+
+document.addEventListener('DOMContentLoaded', async ()=>{
+  try{
+    nav(state.route || 'home');
+    fitBoard();
+    await reloadMaps();
+    if(!state.boardBg && (MAPS[0]?.src)) setMapByIndex(0);
+    // Prime dice output nicely on first load
+    clearDice();
+  }catch(err){ console.error('boot error', err); }
+});
+
+/* =========================
+   Map loading (index.json)
+   ========================= */
+function setMapByIndex(idx){
+  if(!MAPS[idx]) return;
+  state.mapIndex = idx;
+  state.boardBg  = MAPS[idx].src;
+  save(); renderBoard(); renderDmPanel();
+}
+function nextMap(){ if(!MAPS.length) return; setMapByIndex((state.mapIndex+1)%MAPS.length); }
+function prevMap(){ if(!MAPS.length) return; setMapByIndex((state.mapIndex-1+MAPS.length)%MAPS.length); }
+async function reloadMaps(){
+  if(!TRY_FETCH_JSON_INDEX){ return; }
+  try{
+    const res = await fetch('assets/maps/index.json', {cache:'no-store'});
+    if(!res.ok) throw new Error('index.json not found');
+    const list = await res.json();
+    if(Array.isArray(list)){
+      MAPS = list;
+      const cur = state.boardBg;
+      const found = MAPS.findIndex(m => m.src === cur);
+      state.mapIndex = found >= 0 ? found : 0;
+      if(!cur && MAPS[0]) state.boardBg = MAPS[0].src;
+      save();
+    }
+  }catch(e){
+    console.warn('No index.json found or error reading it.', e);
+  }finally{
+    renderDmPanel(); renderBoard();
+  }
+}
+
+/* =========================
+   Expose globals for HTML
+   ========================= */
+window.boardClick=boardClick;
+window.nav=nav;
+window.openBoardViewer=openBoardViewer;
+window.toggleBoardFullscreen=toggleBoardFullscreen;
+window.selectFromPanel=selectFromPanel;
+window.quickD20=quickD20;
+window.quickAdvFor=quickAdvFor;
+window.quickDisFor=quickDisFor;
+window.maximizeDmPanel=maximizeDmPanel;
+window.minimizeDmPanel=minimizeDmPanel;
+window.setDmTab=setDmTab;
+window.prevMap=prevMap;
+window.nextMap=nextMap;
+window.reloadMaps=reloadMaps;
+window.setEnvironment=setEnvironment;
+window.setMapByIndex=setMapByIndex;
+window.clearMap=clearMap;
+window.rollQuick=rollQuick;
