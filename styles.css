@@ -377,3 +377,10 @@ body.modal-open{ overflow:hidden; }
   .feed-card.show-choices .feed-prompt,
   .feed-card.show-choices .food-choices { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
+/* FEED: harden visibility when show-choices is set */
+.feed-card.show-choices .feed-prompt,
+.feed-card.show-choices .food-choices {
+  opacity: 1 !important;
+  transform: none !important;
+}
+

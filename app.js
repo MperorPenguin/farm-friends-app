@@ -1,9 +1,10 @@
-/* Farm Friends — v0.4.3-beta
-   - Feed: use image-based choices from assets/img/animal-food/{animalid}food.png
-   - Always 3 choices (1 correct + 2 decoys)
-   - Fixed broken image paths (forward slashes)
-   - Autoplay sounds after first user interaction
-   - Bigger feedback cards with confetti
+/* Farm Friends — v0.4.4-beta
+   Fixes:
+   - Restores entrance sequence for FEED (entering → focused → show-choices)
+   - Restores menu puff + confetti animations
+   - Adds image fallback for food choices (emoji/label if PNG missing)
+   - Keeps 3 choices (1 correct + 2 decoys), autoplay-after-interaction,
+     bigger feedback popups, exclusive audio, and “Play Sound” buttons.
 */
 
 (() => {
@@ -56,10 +57,10 @@
   let currentId    = null;
   let fadeInterval = null;
 
-  // User gesture unlock (needed for autoplay)
+  // User gesture unlock (needed for autoplay on mobile)
   let userInteracted = false;
 
-  // Recent animals memory
+  // Recent animals memory (avoid immediate repeats)
   const LS_RECENT_KEY = 'ff_recent_answers';
   const LS_FEED_RECENT_KEY = 'ff_feed_recent';
   const RECENT_SIZE = Math.max(2, Math.min(4, (ANIMALS?.length||8)-1));
@@ -82,10 +83,11 @@
     return updated;
   }
 
-  /* ============== AUDIO ============== */
+  /* ============== AUDIO (exclusive) ============== */
   function createAudio(src){
     const a = new Audio(src);
     a.preload='auto'; a.autoplay=false;
+    a.setAttribute('aria-hidden','true');
     return a;
   }
   function preloadAudio(){
@@ -140,9 +142,50 @@
     window.addEventListener(evt,markInteracted,{passive:true});
   });
 
-  /* ============== UI HELPERS ============== */
-  function menuPuff(btn){ /* puff animation omitted for brevity, same as before */ }
-  function confettiBurst(container){ /* confetti animation, same as before */ }
+  /* ============== UI FLOURISHES (restored) ============== */
+  function menuPuff(btn){
+    if(!btn) return;
+    const puff=document.createElement('div'); puff.className='menu-burst';
+    const rect=btn.getBoundingClientRect(); const w=rect.width,h=rect.height,count=14;
+    for(let i=0;i<count;i++){
+      const s=document.createElement('span'); s.className='menu-spark';
+      const x=Math.random()*w*0.8+w*0.1, y=Math.random()*h*0.6+h*0.2;
+      const tx=(Math.random()-0.5)*140, ty=-(40+Math.random()*90);
+      const size=8+Math.random()*12;
+      s.style.setProperty('--x',Math.round(x)+'px'); s.style.setProperty('--y',Math.round(y)+'px');
+      s.style.setProperty('--tx',Math.round(tx)+'px'); s.style.setProperty('--ty',Math.round(ty)+'px');
+      s.style.setProperty('--sz',Math.round(size)+'px'); s.style.setProperty('--d',(420+Math.random()*280)+'ms');
+      puff.appendChild(s);
+    }
+    btn.appendChild(puff); setTimeout(()=>puff.remove(),720);
+  }
+
+  function confettiBurst(container){
+    if(!container) return;
+    const layer = document.createElement('div');
+    layer.className = 'confetti';
+    const rect = container.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    const count = 22;
+    for(let i=0;i<count;i++){
+      const iEl = document.createElement('i');
+      const x = Math.random()*w*0.9 + w*0.05;
+      const y = Math.random()*h*0.4 + h*0.15;
+      const tx = (Math.random()-0.5)*200;
+      const ty = -(60 + Math.random()*120);
+      const size = 8 + Math.random()*10;
+      const dur = 600 + Math.random()*400;
+      iEl.style.setProperty('--x', Math.round(x)+'px');
+      iEl.style.setProperty('--y', Math.round(y)+'px');
+      iEl.style.setProperty('--tx', Math.round(tx)+'px');
+      iEl.style.setProperty('--ty', Math.round(ty)+'px');
+      iEl.style.setProperty('--sz', Math.round(size)+'px');
+      iEl.style.setProperty('--d', Math.round(dur)+'ms');
+      layer.appendChild(iEl);
+    }
+    container.appendChild(layer);
+    setTimeout(()=>layer.remove(), 1100);
+  }
 
   /* ============== EXPLORE MODAL ============== */
   function openModal(animal, triggerEl){
@@ -150,6 +193,8 @@
     lastFocused=triggerEl||document.activeElement;
     document.body.classList.add('modal-open');
     overlay.classList.remove('hidden','closing');
+    overlay.setAttribute('aria-hidden','false');
+
     modalTitle.textContent=animal.name||'';
     modalImg.src=animal.image; modalImg.alt=animal.name;
     factType.textContent=animal.type||'';
@@ -157,16 +202,18 @@
     factDiet.textContent=animal.diet||'';
     factHome.textContent=animal.home||'';
     factFun.textContent=animal.fun||'';
-    modalPlay.onclick=()=>{stopCurrent(false); playAnimalSound(animal.id,true);};
+    modalPlay.onclick=()=>{ stopCurrent(false); playAnimalSound(animal.id,true); };
   }
   function closeModal(){
+    stopCurrent(false);
     overlay.classList.add('closing');
     setTimeout(()=>{
       overlay.classList.add('hidden');
-      document.body.classList.remove('modal-open');
+      overlay.setAttribute('aria-hidden','true');
       overlay.classList.remove('closing');
-      if(lastFocused) lastFocused.focus();
-    },180);
+      document.body.classList.remove('modal-open');
+      if(lastFocused && lastFocused.focus) lastFocused.focus();
+    },200);
   }
 
   /* ============== EXPLORE SCENE ============== */
@@ -179,24 +226,46 @@
       btn.dataset.id=animal.id;
       btn.style.background=animal.color;
       btn.innerHTML=`<img src="${animal.image}" alt="${animal.name}"><div class="animal-name">${animal.name}</div>`;
-      btn.onclick=()=>openModal(animal,btn);
+      btn.addEventListener('click', ()=>{
+        markInteracted();
+        btn.classList.add('selected'); btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop');
+        openModal(animal,btn);
+      });
       sceneEl.appendChild(btn);
     });
   }
+
+  /* ============== HELPERS ============== */
+  function randInt(n){ return Math.floor(Math.random()*n); }
+  function shuffle(arr){ const a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+  function chooseAvoiding(ids, avoid){
+    const pool = ids.filter(id=>!avoid.includes(id));
+    if(pool.length>0) return pool[randInt(pool.length)];
+    return ids[randInt(ids.length)];
+  }
+
+  function btnPlayHTML(label='Play Sound'){ return `
+    <span class="btn-ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+        <path d="M8 5v14l11-7z"></path>
+      </svg>
+    </span>
+    <span class="btn-label">${label}</span>`; }
 
   /* ============== MATCH (Guess the Sound) ============== */
   function newRound(){
     stopCurrent(false);
     if(!choicesEl) return;
-    const pool=ANIMALS.map(a=>a.id).filter(id=>!recentAnswers.includes(id));
-    if(pool.length<1) pool=ANIMALS.map(a=>a.id);
-    const answerId=pool[Math.floor(Math.random()*pool.length)];
-    recentAnswers=updateRecent(LS_RECENT_KEY,recentAnswers,answerId);
-    const answer=getAnimal(answerId);
 
-    const wrong=ANIMALS.filter(a=>a.id!==answerId);
-    const opts=[answer, wrong[Math.floor(Math.random()*wrong.length)], wrong[Math.floor(Math.random()*wrong.length)]];
-    opts.sort(()=>Math.random()-0.5);
+    // pick answer avoiding repeats
+    const ids = ANIMALS.map(a=>a.id);
+    const answerId = chooseAvoiding(ids, recentAnswers);
+    recentAnswers = updateRecent(LS_RECENT_KEY, recentAnswers, answerId);
+    const answer = getAnimal(answerId);
+
+    // build 3 choices
+    const wrong = ANIMALS.filter(a=>a.id!==answerId);
+    const opts = shuffle([answer, wrong[randInt(wrong.length)], wrong[randInt(wrong.length)]]);
 
     choicesEl.innerHTML='';
     opts.forEach(opt=>{
@@ -205,6 +274,7 @@
       btn.dataset.id=opt.id;
       btn.innerHTML=`<img src="${opt.image}" alt="${opt.name}">`;
       btn.onclick=()=>{
+        markInteracted();
         stopCurrent(false);
         if(opt.id===answerId){
           btn.classList.add('correct');
@@ -218,74 +288,132 @@
       choicesEl.appendChild(btn);
     });
 
-    // autoplay after first interaction
-    playAnimalSound(answerId);
-    currentRound=answerId;
-    resultEl.textContent='Tap “Play Sound” to hear the clue.';
-    playSoundBtn.onclick=()=>{stopCurrent(false); playAnimalSound(answerId,true);};
+    // UI text + autoplay after interaction
+    if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.';
+    if(playSoundBtn){
+      playSoundBtn.classList.add('btn','btn-hero','btn-lg');
+      playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
+      playSoundBtn.setAttribute('aria-label','Play Sound');
+      playSoundBtn.onclick=()=>{ markInteracted(); stopCurrent(false); playAnimalSound(answerId,true); };
+    }
+    playAnimalSound(answerId /* auto */, false).catch(()=>{});
   }
 
-  /* ============== FEED ============== */
+  /* ============== FEED (with image fallback) ============== */
+  // Emoji fallback per food key
+  const FOOD_EMOJI = {
+    grass:'🌿', hay:'🟨', grains:'🌾', seeds:'🌰', insects:'🐞', plants:'🌱', leaves:'🍃', veggies:'🥕', oats:'🥣'
+  };
+  const FOOD_LABELS = window.FOOD_LABELS || {
+    grass:'Grass', hay:'Hay', grains:'Grains', seeds:'Seeds', insects:'Insects', plants:'Plants', leaves:'Leaves', veggies:'Vegetables', oats:'Oats'
+  };
+
   function newFeedRound(){
     stopCurrent(false);
-    const pool=ANIMALS.map(a=>a.id).filter(id=>!recentFeed.includes(id));
-    if(pool.length<1) pool=ANIMALS.map(a=>a.id);
-    const animalId=pool[Math.floor(Math.random()*pool.length)];
-    recentFeed=updateRecent(LS_FEED_RECENT_KEY,recentFeed,animalId);
-    const animal=getAnimal(animalId);
+
+    // pick animal avoiding repeats
+    const ids = ANIMALS.map(a=>a.id);
+    const animalId = chooseAvoiding(ids, recentFeed);
+    recentFeed = updateRecent(LS_FEED_RECENT_KEY, recentFeed, animalId);
+    const animal = getAnimal(animalId);
     if(!animal) return;
 
-    currentFeed=animalId;
-    feedImg.src=animal.image; feedImg.alt=animal.name;
-    feedName.textContent=animal.name;
+    currentFeed = animalId;
+    if(feedImg){ feedImg.src=animal.image; feedImg.alt=animal.name; }
+    if(feedName){ feedName.textContent=animal.name; }
 
-    const correct=animal.food;
-    const wrongIds=ANIMALS.map(a=>a.food).filter(f=>f!==correct);
-    const decoys=[]; while(decoys.length<2 && wrongIds.length>0){
-      const pick=wrongIds.splice(Math.floor(Math.random()*wrongIds.length),1)[0];
-      decoys.push(pick);
+    // build 3 food choices (correct + 2 decoys)
+    const correct = animal.food;
+    const allFoods = Array.from(new Set(ANIMALS.map(a=>a.food)));
+    const decoyPool = allFoods.filter(f=>f!==correct);
+    const decoys = shuffle(decoyPool).slice(0,2);
+    const choiceIds = shuffle([correct, ...decoys]);
+
+    renderFoodChoices(choiceIds, correct, animal);
+
+    // Entrance sequence (restored) → reveals prompt + choices
+    if(feedCard){
+      feedCard.classList.remove('entering','focused','show-choices');
+      void feedCard.offsetWidth; // reflow to restart animations
+      feedCard.classList.add('entering');
+      setTimeout(()=>feedCard.classList.add('focused'), 520);
+      setTimeout(()=>feedCard.classList.add('show-choices'), 820);
     }
-    const all=[correct,...decoys].sort(()=>Math.random()-0.5);
 
+    // Autoplay animal sound after entrance (if user has interacted)
+    setTimeout(()=>{ playAnimalSound(animalId /* auto */, false).catch(()=>{}); }, 880);
+
+    // Feed replay
+    if(feedPlayBtn){
+      feedPlayBtn.onclick=()=>{ markInteracted(); stopCurrent(false); playAnimalSound(animalId,true); };
+    }
+  }
+
+  function renderFoodChoices(ids, correctId, animal){
+    if(!foodChoicesEl) return;
     foodChoicesEl.innerHTML='';
-    all.forEach(fid=>{
-      const imgPath=`assets/img/animal-food/${fid}food.png`;
-      const label=FOOD_LABELS[fid]||fid;
-      const btn=document.createElement('button');
+
+    ids.forEach(fid=>{
+      const label = FOOD_LABELS[fid] || (fid.charAt(0).toUpperCase()+fid.slice(1));
+      const imgPath = `assets/img/animal-food/${fid}food.png`;
+
+      const btn = document.createElement('button');
       btn.className='food-choice';
-      btn.innerHTML=`<img src="${imgPath}" alt="${label}" class="food-img"><div>${label}</div>`;
-      btn.onclick=()=>{
+      btn.setAttribute('aria-label', label);
+
+      // Build with IMG; add fallback on error → emoji
+      const img = document.createElement('img');
+      img.className='food-img';
+      img.alt = label;
+      img.src = imgPath;
+      let imgOk = true;
+      img.onerror = () => {
+        imgOk = false;
+        btn.innerHTML = `<div class="food-emoji" aria-hidden="true" style="font-size:2.2rem;line-height:1">${FOOD_EMOJI[fid]||'🍽️'}</div><div>${label}</div>`;
+      };
+
+      // default content (image + label)
+      btn.innerHTML = '';
+      btn.appendChild(img);
+      const cap = document.createElement('div'); cap.textContent = label; btn.appendChild(cap);
+
+      btn.addEventListener('click', ()=>{
+        markInteracted();
         stopCurrent(false);
-        if(fid===correct){
+        if(fid===correctId){
           btn.classList.add('correct');
           confettiBurst(feedCard);
           feedResultEl.textContent=`Yum! ${animal.name} loves ${label}.`;
+          // Optional: replay happy sound
+          playAnimalSound(animal.id, true).catch(()=>{});
         }else{
           btn.classList.add('incorrect');
-          feedResultEl.textContent=`Not quite. ${animal.name} prefers ${FOOD_LABELS[correct]}.`;
+          const correctLabel = FOOD_LABELS[correctId] || correctId;
+          feedResultEl.textContent=`Not quite. ${animal.name} prefers ${correctLabel}.`;
         }
-      };
+      });
+
       foodChoicesEl.appendChild(btn);
     });
-
-    // autoplay sound
-    playAnimalSound(animalId);
-    feedPlayBtn.onclick=()=>{stopCurrent(false); playAnimalSound(animalId,true);};
   }
 
   /* ============== ROUTING ============== */
   function showHome(){
     stopCurrent(false);
-    document.body.className='route-home';
+    document.body.classList.remove('route-explore','route-match','route-feed');
+    document.body.classList.add('route-home');
     homeEl.classList.remove('hidden');
-    appEl.classList.add('hidden');
+    appEl.classList.remove('hidden'); // keep mounted for height/overlay consistency
+    sceneEl.classList.add('hidden');
+    matchEl.classList.add('hidden');
+    feedEl.classList.add('hidden');
     btnBack.classList.add('hidden');
   }
   function showExplore(){
     stopCurrent(false);
-    document.body.className='route-explore';
+    document.body.classList.remove('route-home','route-match','route-feed');
+    document.body.classList.add('route-explore');
     homeEl.classList.add('hidden');
-    appEl.classList.remove('hidden');
     sceneEl.classList.remove('hidden');
     matchEl.classList.add('hidden');
     feedEl.classList.add('hidden');
@@ -293,20 +421,20 @@
   }
   function showMatch(){
     stopCurrent(false);
-    document.body.className='route-match';
+    document.body.classList.remove('route-home','route-explore','route-feed');
+    document.body.classList.add('route-match');
     homeEl.classList.add('hidden');
-    appEl.classList.remove('hidden');
     sceneEl.classList.add('hidden');
-    matchEl.classList.remove('hidden');
     feedEl.classList.add('hidden');
+    matchEl.classList.remove('hidden');
     btnBack.classList.remove('hidden');
     newRound();
   }
   function showFeed(){
     stopCurrent(false);
-    document.body.className='route-feed';
+    document.body.classList.remove('route-home','route-explore','route-match');
+    document.body.classList.add('route-feed');
     homeEl.classList.add('hidden');
-    appEl.classList.remove('hidden');
     sceneEl.classList.add('hidden');
     matchEl.classList.add('hidden');
     feedEl.classList.remove('hidden');
@@ -316,14 +444,22 @@
 
   /* ============== INIT ============== */
   function init(){
+    overlay?.classList.add('hidden'); document.body.classList.remove('modal-open');
     preloadAudio();
     buildScene();
-    btnExplore.onclick=()=>{menuPuff(btnExplore);showExplore();};
-    btnMatch.onclick  =()=>{menuPuff(btnMatch);showMatch();};
-    btnFeed.onclick   =()=>{menuPuff(btnFeed);showFeed();};
-    btnBack.onclick   =()=>{showHome();};
-    modalClose.onclick=()=>{closeModal();};
+
+    // Home buttons
+    btnExplore?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnExplore); setTimeout(showExplore,100); });
+    btnMatch  ?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnMatch);   setTimeout(showMatch,100); });
+    btnFeed   ?.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); menuPuff(btnFeed);    setTimeout(showFeed,100); });
+
+    // Back + modal
+    btnBack  ?.addEventListener('click', (e)=>{ e.preventDefault(); showHome(); });
+    modalClose?.addEventListener('click',(e)=>{ e.preventDefault(); closeModal(); });
+    overlay   ?.addEventListener('click',(e)=>{ if(e.target===overlay) closeModal(); });
+    document.addEventListener('keydown',(e)=>{ if(e.key==='Escape' && !overlay.classList.contains('hidden')) closeModal(); });
+
     showHome();
   }
-  document.addEventListener('DOMContentLoaded',init);
+  document.addEventListener('DOMContentLoaded', init);
 })();
