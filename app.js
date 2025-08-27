@@ -1,10 +1,8 @@
-/* Farm Friends — v0.4.0-beta
-   - Adds Feed the Animal game (route-feed)
-   - "Play Sound" wording everywhere
-   - No audio until user interacts (blocked autoplay)
-   - iOS audio unlock muted
-   - Exclusive audio with fade
-   - Guess & Feed: no immediate repeats (cooldown persisted in localStorage)
+/* Farm Friends — v0.4.1-beta
+   - Auto-play prompt sounds in Match & Feed after user interaction
+   - Feed: entrance sequence (walk-in → focus → reveal choices)
+   - Bigger, rounder feedback with confetti on correct
+   - Keeps exclusive audio & cooldown logic
 */
 (() => {
   const $ = (sel, parent = document) => parent?.querySelector(sel);
@@ -34,6 +32,7 @@
   const feedPlayBtn  = $('#feed-play');
   const foodChoicesEl= $('#food-choices');
   const feedResultEl = $('#feed-result');
+  const feedCard     = $('.feed-card', feedEl);
 
   // Modal (Explore)
   const overlay    = $('#overlay');
@@ -49,15 +48,14 @@
 
   // State
   const audioMap = new Map();
-  let currentRound = null;           // for Match
-  let currentFeed  = null;           // for Feed
+  let currentRound = null;           // Guess the Sound
+  let currentFeed  = null;           // Feed the Animal
   let lastFocused = null;
   let currentId = null;
   let fadeInterval = null;
 
-  // User gesture gate
+  // User gesture gate (required for reliable mobile autoplay)
   let userInteracted = false;
-  let justNavigatedToMatch = false;
 
   // Cooldowns
   const LS_RECENT_KEY = 'ff_recent_answers';
@@ -76,11 +74,10 @@
       return Array.isArray(arr) ? arr.slice(0, 8) : [];
     } catch { return []; }
   }
-  function pushRecent(key, listRefName, id){
-    if(!id) return;
-    const updated = [id, ...this[listRefName].filter(x => x !== id)].slice(0, RECENT_SIZE);
-    this[listRefName] = updated;
+  function updateRecent(key, list, id){
+    const updated = [id, ...list.filter(x => x !== id)].slice(0, RECENT_SIZE);
     try { localStorage.setItem(key, JSON.stringify(updated)); } catch {}
+    return updated;
   }
 
   /* ============== AUDIO (exclusive) ============== */
@@ -116,8 +113,9 @@
     currentId=null;
   }
   function playAnimalSound(id, fromUser=false){
+    // We only auto-play after any user interaction has occurred at least once.
     if(!userInteracted && !fromUser){
-      return Promise.resolve(); // block non-gesture playback until first interaction
+      return Promise.resolve();
     }
     const next = audioMap.get(id);
     if(!next) return Promise.resolve();
@@ -144,6 +142,7 @@
     if(userInteracted) return;
     userInteracted = true;
 
+    // iOS unlock trick (muted) to allow immediate auto-play after navigation
     const first = audioMap.values().next().value;
     if(first){
       const wasMuted = first.muted;
@@ -157,7 +156,7 @@
     window.addEventListener(evt, markInteracted, { passive:true, once:false });
   });
 
-  /* ============== UI FLOURISHES (shared) ============== */
+  /* ============== UI FLOURISHES ============== */
   function menuPuff(btn){
     if(!btn) return; const puff=document.createElement('div'); puff.className='menu-burst';
     const rect=btn.getBoundingClientRect(); const w=rect.width,h=rect.height,count=14;
@@ -172,6 +171,34 @@
       puff.appendChild(s);
     }
     btn.appendChild(puff); setTimeout(()=>puff.remove(),720);
+  }
+
+  /* Confetti for correct feedback */
+  function confettiBurst(container){
+    if(!container) return;
+    const layer = document.createElement('div');
+    layer.className = 'confetti';
+    const rect = container.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    const count = 22;
+    for(let i=0;i<count;i++){
+      const iEl = document.createElement('i');
+      const x = Math.random()*w*0.9 + w*0.05;
+      const y = Math.random()*h*0.4 + h*0.15;
+      const tx = (Math.random()-0.5)*200;
+      const ty = -(60 + Math.random()*120);
+      const size = 8 + Math.random()*10;
+      const dur = 600 + Math.random()*400;
+      iEl.style.setProperty('--x', Math.round(x)+'px');
+      iEl.style.setProperty('--y', Math.round(y)+'px');
+      iEl.style.setProperty('--tx', Math.round(tx)+'px');
+      iEl.style.setProperty('--ty', Math.round(ty)+'px');
+      iEl.style.setProperty('--sz', Math.round(size)+'px');
+      iEl.style.setProperty('--d', Math.round(dur)+'ms');
+      layer.appendChild(iEl);
+    }
+    container.appendChild(layer);
+    setTimeout(()=>layer.remove(), 1100);
   }
 
   /* ============== EXPLORE MODAL ============== */
@@ -196,7 +223,7 @@
       modalPlay.innerHTML = btnPlayHTML('Play Sound');
     }
 
-    playAnimalSound(animal.id, true).catch(()=>{});
+    // Don’t auto-play on modal open; we keep it to explicit user tap here
     modalClose?.focus();
   }
   function closeModal(){
@@ -260,6 +287,8 @@
       secondary.classList.remove('hidden'); secondary.textContent=secondaryLabel;
       secondary.onclick=()=>{ onSecondary&&onSecondary(); hideFeedback(false); };
     }else if(secondary){ secondary.classList.add('hidden'); secondary.onclick=null; }
+
+    if(correct) confettiBurst(card);
     setTimeout(()=>primary?.focus(),10);
   }
   function hideFeedback(animateOut=true){
@@ -308,17 +337,19 @@
 
     renderChoices(pool);
 
+    // Auto-play the clue (after user has interacted once)
     setTimeout(()=>{
-      stopCurrent(false);
-      if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.';
       if(playSoundBtn){
         playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
         playSoundBtn.setAttribute('aria-label','Play Sound');
       }
+      if(resultEl) resultEl.textContent='Tap “Play Sound” to hear the clue.';
+      if(userInteracted){
+        playAnimalSound(answer.id /* auto */, false).catch(()=>{});
+      }
       // cooldown record
-      recentAnswers = [answer.id, ...recentAnswers.filter(x=>x!==answer.id)].slice(0, RECENT_SIZE);
-      try{ localStorage.setItem(LS_RECENT_KEY, JSON.stringify(recentAnswers)); }catch{}
-    }, 120);
+      recentAnswers = updateRecent(LS_RECENT_KEY, recentAnswers, answer.id);
+    }, 180);
   }
 
   function renderChoices(animals){
@@ -339,7 +370,7 @@
           btn.classList.add('incorrect');
           const msg=`That was the <b>${a.name}</b> — ${a.fun}<br>Let’s listen again and find the <b>${answer.name}</b>!`;
           showFeedback({
-            correct:false, title:'Nice try!', message:msg, primaryLabel:'Keep guessing', onPrimary:()=>{},
+            correct:false, title:'Not quite!', message:msg, primaryLabel:'Keep guessing', onPrimary:()=>{},
             secondaryLabel:'Play Sound', onSecondary:()=>{ stopCurrent(false); playAnimalSound(answer.id, true).catch(()=>{}); }
           });
         }
@@ -372,53 +403,79 @@
     if(feedImg){ feedImg.src = animal.image; feedImg.alt = animal.name; }
     if(feedName){ feedName.textContent = animal.name; }
 
-    // build food choices: correct + 2 decoys
+    // Build food choices: correct + 2 decoys
     const correctId = animal.food;
-    const decoyPool = (FOOD_DECOYS || Object.keys(FOOD)).filter(id => id !== correctId);
-    shuffle(decoyPool);
-    const decoys = decoyPool.slice(0,2);
+    const allFood = (window.FOOD_DECOYS || Object.keys(window.FOOD || {}));
+    const decoyPool = allFood.filter(id => id !== correctId);
+    const decoys = shuffle(decoyPool).slice(0,2);
     const choiceIds = shuffle([correctId, ...decoys]);
 
     renderFoodChoices(choiceIds, correctId, animal);
 
+    // Entrance sequence
+    if(feedCard){
+      feedCard.classList.remove('entering','focused','show-choices');
+      // 1) Walk in
+      void feedCard.offsetWidth;
+      feedCard.classList.add('entering');
+      // 2) Focus bump
+      setTimeout(()=>feedCard.classList.add('focused'), 520);
+      // 3) Reveal prompt and choices
+      setTimeout(()=>feedCard.classList.add('show-choices'), 820);
+    }
+
+    // Auto-play animal sound after entrance if user has interacted
+    setTimeout(()=>{
+      if(userInteracted){
+        playAnimalSound(animal.id /* auto */, false).catch(()=>{});
+      }
+    }, 880);
+
     // cooldown record
-    recentFeed = [animal.id, ...recentFeed.filter(x=>x!==animal.id)].slice(0, RECENT_SIZE);
-    try{ localStorage.setItem(LS_FEED_RECENT_KEY, JSON.stringify(recentFeed)); }catch{}
+    recentFeed = updateRecent(LS_FEED_RECENT_KEY, recentFeed, animal.id);
   }
 
   function renderFoodChoices(ids, correctId, animal){
-    if(!foodChoicesEl) return; foodChoicesEl.innerHTML='';
-    ids.forEach(fid=>{
-      const meta = FOOD[fid] || {label: fid, emoji:'🍽️', why:'Yummy food.'};
-      const btn = document.createElement('button');
-      btn.className = 'food-choice';
-      btn.setAttribute('aria-label', meta.label);
-      btn.innerHTML = `<div class="food-emoji">${meta.emoji}</div><div>${meta.label}</div>`;
-      btn.addEventListener('click', ()=>{
-        markInteracted();
-        stopCurrent(false);
-        if(fid === correctId){
-          btn.classList.add('correct');
-          // play happy animal
-          playAnimalSound(animal.id, true).catch(()=>{});
-          const msg = `<b>${animal.name}</b> loves ${FOOD[correctId].label.toLowerCase()}! ${FOOD[correctId].why}`;
-          showFeedback({
-            correct:true, title:'Yum!', message:msg, primaryLabel:'Next',
-            onPrimary:()=>{ stopCurrent(false); newFeedRound(); }
-          });
-        } else {
-          btn.classList.add('incorrect');
-          const msg = `${FOOD[fid]?.label || 'That'} isn’t the best choice.<br>Try feeding <b>${animal.name}</b> some <b>${FOOD[correctId].label}</b> — ${FOOD[correctId].why}`;
-          showFeedback({
-            correct:false, title:'Not quite!', message:msg,
-            primaryLabel:'Keep trying', onPrimary:()=>{},
-            secondaryLabel:'Play Sound', onSecondary:()=>{ stopCurrent(false); playAnimalSound(animal.id, true).catch(()=>{}); }
-          });
-        }
-      });
-      foodChoicesEl.appendChild(btn);
+  if(!foodChoicesEl) return; 
+  foodChoicesEl.innerHTML='';
+
+  ids.forEach(fid=>{
+    const imgPath = `assets/img/animal-food/${fid}food.png`;
+    const label = fid.charAt(0).toUpperCase() + fid.slice(1);
+
+    const btn = document.createElement('button');
+    btn.className = 'food-choice';
+    btn.setAttribute('aria-label', label);
+    btn.innerHTML = `<img src="${imgPath}" alt="${label}" class="food-img"><div>${label}</div>`;
+
+    btn.addEventListener('click', ()=>{
+      markInteracted();
+      stopCurrent(false);
+
+      if(fid === correctId){
+        btn.classList.add('correct');
+        playAnimalSound(animal.id, true).catch(()=>{});
+        const msg = `<b>${animal.name}</b> loves ${label.toLowerCase()}!`;
+        showFeedback({
+          correct:true, title:'Yum!', message:msg, primaryLabel:'Next',
+          onPrimary:()=>{ stopCurrent(false); newFeedRound(); }
+        });
+      } else {
+        btn.classList.add('incorrect');
+        const correctLabel = correctId.charAt(0).toUpperCase() + correctId.slice(1);
+        const msg = `${label} isn’t right.<br>Try feeding <b>${animal.name}</b> some <b>${correctLabel}</b>!`;
+        showFeedback({
+          correct:false, title:'Not quite!', message:msg,
+          primaryLabel:'Keep trying', onPrimary:()=>{},
+          secondaryLabel:'Play Sound', onSecondary:()=>{ stopCurrent(false); playAnimalSound(animal.id, true).catch(()=>{}); }
+        });
+      }
     });
-  }
+
+    foodChoicesEl.appendChild(btn);
+  });
+}
+
 
   /* ============== ROUTING ============== */
   function setRoute(route){
@@ -456,7 +513,7 @@
       playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
       playSoundBtn.setAttribute('aria-label','Play Sound');
     }
-    justNavigatedToMatch = true;
+    // Fresh round + (auto-play after render if user interacted)
     newRound();
   }
   function showFeed(){
@@ -498,7 +555,7 @@
       playSoundBtn.classList.add('btn','btn-hero','btn-lg');
       playSoundBtn.innerHTML = btnPlayHTML('Play Sound');
       playSoundBtn.setAttribute('aria-label','Play Sound');
-      playSoundBtn.addEventListener('click', (e)=>{ e.preventDefault(); playCurrentPrompt(); });
+      playSoundBtn.addEventListener('click', (e)=>{ e.preventDefault(); markInteracted(); playCurrentPrompt(); });
     }
 
     // Feed controls

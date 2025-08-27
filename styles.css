@@ -1,6 +1,9 @@
 /* ===============================
    Farm Friends – Stylesheet
-   Version: v0.3.0-beta (adds Feed section)
+   Version: v0.4.1-beta
+   - Auto-play support styles
+   - Feed entrance animation (walk-in → focus → reveal choices)
+   - Larger, rounder feedback popups + confetti
    =============================== */
 
 :root{
@@ -41,8 +44,8 @@ body::before{
 /* Section-specific tints */
 body.route-home   { --bg-overlay: rgba(255,255,240,0.55); }
 body.route-explore{ --bg-overlay: rgba(255,255,255,0.62); }
-body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
-body.route-feed   { --bg-overlay: rgba(0,0,0,0.18); } /* slightly focused but friendlier than match */
+body.route-match  { --bg-overlay: rgba(0,0,0,0.25); } /* darker for focus */
+body.route-feed   { --bg-overlay: rgba(0,0,0,0.18); } /* slightly lighter than Match but focused */
 
 #home, main#app, .scene, .match, .feed { position:relative; z-index:1; }
 
@@ -213,13 +216,13 @@ body.modal-open{ overflow:hidden; }
   display:grid; place-items:center; overflow:auto;
 }
 .match-card{
-  width:min(760px,100%); background:#fff; border-radius: 28px;
+  width:min(820px,100%); background:#fff; border-radius: 28px;
   border:4px solid var(--brand-brown);
-  box-shadow: 0 14px 28px rgba(0,0,0,.2); padding:1.1rem;
+  box-shadow: 0 14px 28px rgba(0,0,0,.2); padding:1.2rem;
   transition: transform .2s ease, opacity .2s ease;
 }
 .prompt{ display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
-.prompt-text{ font-size:1.25rem; font-weight:900; letter-spacing:.2px; color: var(--brand-brown); }
+.prompt-text{ font-size:1.35rem; font-weight:900; letter-spacing:.2px; color: var(--brand-brown); }
 .choices{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:1rem; }
 .choice{
   background:#fff; border:3px solid var(--brand-brown); border-radius: 26px;
@@ -242,55 +245,120 @@ body.modal-open{ overflow:hidden; }
   display:grid; place-items:center; overflow:auto;
 }
 .feed-card{
-  width:min(820px,100%); background:#fff; border-radius: 28px;
+  width:min(860px,100%); background:#fff; border-radius: 28px;
   border:4px solid var(--brand-brown);
-  box-shadow: 0 14px 28px rgba(0,0,0,.2); padding:1.1rem;
+  box-shadow: 0 14px 28px rgba(0,0,0,.2); padding:1.2rem; position:relative;
 }
 .feed-top{
   display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1rem;
 }
 .feed-animal{ display:flex; align-items:center; gap:.9rem; }
-#feed-img{ width:min(220px,38vw); height:auto; object-fit:contain; }
-.feed-name{ font-size:1.5rem; font-weight:900; color: var(--brand-brown); }
+#feed-img{ width:min(240px,42vw); height:auto; object-fit:contain; }
+.feed-name{ font-size:1.6rem; font-weight:900; color: var(--brand-brown); }
 
 .feed-prompt{
-  font-size:1.25rem; font-weight:900; letter-spacing:.2px; color: var(--brand-brown);
-  margin:.25rem 0 1rem;
+  font-size:1.35rem; font-weight:900; letter-spacing:.2px; color: var(--brand-brown);
+  margin:.25rem 0 1rem; opacity:0; transform: translateY(8px);
 }
 .food-choices{
-  display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:1rem;
+  display:grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap:1rem;
+  opacity:0; transform: translateY(12px);
 }
-.food-choice{
-  background:#fff; border:3px solid var(--brand-brown); border-radius: 26px;
-  padding:.9rem; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:.5rem;
-  min-height:170px; cursor:pointer; box-shadow:0 10px 18px rgba(0,0,0,.16);
+.food-choice {
+  background:#fff;
+  border:3px solid var(--brand-brown);
+  border-radius: 26px;
+  padding:.95rem;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:.6rem;
+  min-height:180px;
+  cursor:pointer;
+  box-shadow:0 10px 18px rgba(0,0,0,.16);
   transition: transform .1s ease, filter .12s ease;
-  font-size:1.05rem; font-weight:800; color: var(--brand-brown);
+  font-size:1.12rem;
+  font-weight:800;
+  color: var(--brand-brown);
 }
-.food-emoji{ font-size:2.2rem; line-height:1; }
+.food-choice img.food-img {
+  width: 90px;
+  height: auto;
+  object-fit: contain;
+}
 .food-choice:hover{ transform: translateY(-2px) scale(1.02); }
 .food-choice.correct{ border-color: var(--brand-green); box-shadow: 0 0 0 6px rgba(134,197,106,.18), 0 8px 18px rgba(0,0,0,.18); }
 .food-choice.incorrect{ border-color: var(--brand-red); box-shadow: 0 0 0 6px rgba(229,100,74,.18), 0 8px 18px rgba(0,0,0,.18); }
 
-/* Feedback popup (shared) */
+/* Feed entrance sequence */
+.feed-card.entering #feed-img{ animation: animal-walk-in .5s ease-out both; }
+.feed-card.entering .feed-name{ animation: fade-in-up .35s .2s ease-out both; }
+.feed-card.focused #feed-img{ animation: animal-focus .35s ease-out both; }
+.feed-card.show-choices .feed-prompt{ animation: fade-in-up .35s ease-out both; }
+.feed-card.show-choices .food-choices{ animation: fade-in-up .45s .1s ease-out both; }
+
+@keyframes animal-walk-in{
+  from{ transform: translateX(-18px) scale(.98) rotate(-1.5deg); opacity:0 }
+  to{ transform: translateX(0) scale(1) rotate(0); opacity:1 }
+}
+@keyframes animal-focus{
+  from{ transform: scale(1) }
+  to{ transform: scale(1.05) }
+}
+@keyframes fade-in-up{
+  from{ opacity:0; transform: translateY(10px) }
+  to{ opacity:1; transform: translateY(0) }
+}
+
+/* Feedback popup – bigger, rounder, readable */
 .feedback-overlay{
   position:fixed; inset:0; z-index:200; display:grid; place-items:center;
   background: rgba(0,0,0,.32); backdrop-filter: blur(2px);
 }
 .feedback-overlay.hidden{ display:none; }
 .feedback-card{
-  width:min(640px, 92vw); border-radius: 28px; padding:1.1rem;
-  border:4px solid var(--brand-brown); background:#fff; box-shadow: 0 16px 32px rgba(0,0,0,.3);
-  animation: fb-in .2s ease both; max-height: 88dvh; overflow:auto;
+  width:min(760px, 94vw); border-radius: 32px; padding:1.25rem;
+  border:4px solid var(--brand-brown); background:#fff; box-shadow: 0 18px 36px rgba(0,0,0,.3);
+  animation: fb-in .22s ease both; max-height: 88dvh; overflow:auto;
 }
-.feedback-card.out{ animation: fb-out .2s ease both; }
+.feedback-card.out{ animation: fb-out .18s ease both; }
 @keyframes fb-in{ from{transform:scale(.95); opacity:0} to{transform:scale(1); opacity:1} }
 @keyframes fb-out{ to{transform:scale(.94); opacity:0} }
-.fb-title{ font-size:1.6rem; font-weight:900; margin:.2rem 0; color: var(--brand-brown); }
-.fb-message{ font-size:1.1rem; line-height:1.35; margin:.25rem 0 .7rem; }
-.fb-actions{ display:flex; gap:.6rem; justify-content:flex-end; flex-wrap:wrap; }
+.fb-title{
+  font-size: clamp(1.6rem, 4.2vw, 2rem);
+  font-weight:900; margin:.2rem 0; color: var(--brand-brown); letter-spacing:.2px;
+}
+.fb-message{
+  font-size: clamp(1.15rem, 3.4vw, 1.3rem);
+  line-height:1.5; margin:.35rem 0 .9rem; color:#4b443d;
+}
+.fb-actions{ display:flex; gap:.7rem; justify-content:flex-end; flex-wrap:wrap; }
 .feedback-overlay.correct #fb-primary.btn-hero{ background: linear-gradient(135deg, var(--brand-green), #6fb85a 60%, #5aa44c); }
 .feedback-overlay.incorrect #fb-secondary.btn-hero{ background: linear-gradient(135deg, var(--brand-orange), #e0872f 60%, #cc792a); }
+
+/* Confetti for correct answers */
+.feedback-overlay.correct .feedback-card{
+  position:relative;
+  box-shadow: 0 0 0 6px rgba(134,197,106,.18), 0 20px 36px rgba(0,0,0,.28);
+}
+.confetti{
+  position:absolute; inset:0; pointer-events:none;
+}
+.confetti i{
+  --x: 0; --y: 0; --tx: 0; --ty: -60px; --d: 800ms; --sz: 10px;
+  position:absolute; left:var(--x); top:var(--y);
+  width:var(--sz); height:var(--sz); border-radius:4px;
+  background: conic-gradient(#ffd166, #f4978e, #bee3db, #f3c64e);
+  opacity:.95; transform:translate(0,0) rotate(0deg);
+  animation: confetti-pop var(--d) ease-out forwards;
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,.18));
+}
+@keyframes confetti-pop{
+  0%{ opacity:0; transform: translate(0,0) rotate(0deg) }
+  10%{ opacity:1 }
+  100%{ opacity:0; transform: translate(var(--tx), var(--ty)) rotate(140deg) }
+}
 
 /* Utilities */
 .hidden{ display:none !important; }
@@ -298,11 +366,15 @@ body.modal-open{ overflow:hidden; }
 @media (max-width:480px){
   .animal{ min-height:140px }
   .animal-name{ font-size:1rem }
-  .prompt-text{ font-size:1.08rem }
+  .prompt-text, .feed-prompt{ font-size:1.15rem }
   .btn-lg{ font-size:1.05rem; padding:.9rem 1.1rem; }
 }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce){
   .animal, .choice, .menu-card, .match-card, .feed-card, .feedback-card{ animation:none !important; transition:none !important; }
+  .feed-card.entering #feed-img,
+  .feed-card.focused #feed-img,
+  .feed-card.show-choices .feed-prompt,
+  .feed-card.show-choices .food-choices { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
