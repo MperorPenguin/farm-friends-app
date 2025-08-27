@@ -53,6 +53,14 @@
             </div>
           </button>
 
+          <button id="btn-feed" class="menu-card" aria-label="Feed the Animal">
+            <img src="assets/img/pig.png" alt="" aria-hidden="true" />
+            <div>
+              <div class="title">Feed the Animal</div>
+              <div class="subtitle">Pick the yummy food the animal likes!</div>
+            </div>
+          </button>
+
           <button id="btn-story" class="menu-card disabled" aria-label="Story Time (coming soon)" disabled>
             <img src="assets/img/sheep.png" alt="" aria-hidden="true" />
             <div>
@@ -66,14 +74,6 @@
             <div>
               <div class="title">Find the Animal</div>
               <div class="subtitle">Coming soon — follow the clue and tap!</div>
-            </div>
-          </button>
-
-          <button id="btn-feed" class="menu-card disabled" aria-label="Feed the Animal (coming soon)" disabled>
-            <img src="assets/img/pig.png" alt="" aria-hidden="true" />
-            <div>
-              <div class="title">Feed the Animal</div>
-              <div class="subtitle">Coming soon — pick the right yummy food.</div>
             </div>
           </button>
         </div>
@@ -109,11 +109,37 @@
             </button>
           </div>
 
-          <div id="choices" class="choices" role="group" aria-label="Animal choices">
-            <!-- Three choices rendered each round by app.js -->
-          </div>
+          <div id="choices" class="choices" role="group" aria-label="Animal choices"></div>
 
           <div id="result" class="result" role="status" aria-live="polite">Tap “Play Sound” to hear the clue.</div>
+        </div>
+      </section>
+
+      <!-- =========================
+           Feed the Animal
+           ========================= -->
+      <section id="feed" class="feed hidden" aria-label="Feed the Animal game" role="region">
+        <div class="feed-card">
+          <div class="feed-top">
+            <div class="feed-animal">
+              <img id="feed-img" src="" alt="" />
+              <div id="feed-name" class="feed-name"></div>
+            </div>
+            <button id="feed-play" class="btn btn-hero btn-lg" aria-label="Play Sound">
+              <span class="btn-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" focusable="false" aria-hidden="true">
+                  <path d="M8 5v14l11-7z"></path>
+                </svg>
+              </span>
+              <span class="btn-label">Play Sound</span>
+            </button>
+          </div>
+
+          <div class="feed-prompt">What does this animal like to eat?</div>
+
+          <div id="food-choices" class="food-choices" role="group" aria-label="Food choices"></div>
+
+          <div id="feed-result" class="result" role="status" aria-live="polite"></div>
         </div>
       </section>
     </main>
