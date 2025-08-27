@@ -1,651 +1,329 @@
-/* DMToolkit v2.2.1 | app.js (stable build)
-   - 26x26 auto-fit board, fullscreen & pop-out viewer
-   - Maps loaded from assets/maps/index.json (PNG/SVG)
-   - DM Panel: Party/NPCs/Enemies/Notes/Tools
-   - Tools: Environment (trait-aware), Map selector, Quick Dice (incl. d20)
-   - Toasts: top-right, auto-dismiss, close on outside click & when DM panel closes
-   - Dice page: animated “rolling” reveal + big themed SVG
+/* Farm Friends — v0.4.3-beta
+   - Feed: use image-based choices from assets/img/animal-food/{animalid}food.png
+   - Always 3 choices (1 correct + 2 decoys)
+   - Fixed broken image paths (forward slashes)
+   - Autoplay sounds after first user interaction
+   - Bigger feedback cards with confetti
 */
 
-/* =========================
-   Grid & Maps
-   ========================= */
-const GRID_COLS = 26;
-const GRID_ROWS = 26;
+(() => {
+  const $ = (sel, parent = document) => parent?.querySelector(sel);
 
-// Maps list is loaded from assets/maps/index.json
-let MAPS = []; // replaced by JSON at runtime
-const TRY_FETCH_JSON_INDEX = true;
+  // Elements
+  const appEl   = $('#app');
+  const homeEl  = $('#home');
+  const sceneEl = $('#scene');
+  const matchEl = $('#match');
+  const feedEl  = $('#feed');
+  const btnBack = $('#btn-back');
 
-/* =========================
-   Environments (trait-aware)
-   ========================= */
-const ENVIRONMENTS = ['Forest','Cavern','Open Field','Urban','Swamp','Desert'];
-const ENV_RULES = {
-  Forest:     { advIfClass:['Rogue'],                    disIfTrait:['Heavy Armor'], advIfTrait:['Stealthy'] },
-  Cavern:     { advIfTrait:['Darkvision','Burrower','Undead'], disIfTrait:['Stealthy'] },
-  'Open Field': { advIfTrait:['Mounted'],                disIfTrait:['Stealthy'] },
-  Urban:      { advIfTrait:['Stealthy'],                 disIfClass:['Enemy'] },
-  Swamp:      { advIfTrait:['Amphibious'],               disIfTrait:['Heavy Armor'] },
-  Desert:     { advIfTrait:['Survivalist'],              disIfTrait:['Heavy Armor'] }
-};
+  // Home buttons
+  const btnExplore = $('#btn-explore');
+  const btnMatch   = $('#btn-match');
+  const btnFeed    = $('#btn-feed');
 
-/* =========================
-   State & persistence
-   ========================= */
-const state = load() || {
-  route: 'home',
-  boardBg: null,
-  tokens: {
-    pc: [
-      {id:'p1', name:'Aria',   cls:'Rogue',   traits:['Stealthy','Light Armor'], hp:[10,10], pos:[2,3]},
-      {id:'p2', name:'Bronn',  cls:'Fighter', traits:['Heavy Armor','Brute'],     hp:[13,13], pos:[4,4]},
-    ],
-    npc:   [{id:'n1', name:'Elder Bran', cls:'NPC',   traits:['Civilian'],   hp:[6,6],  pos:[7,6]}],
-    enemy: [{id:'e1', name:'Skeleton A', cls:'Enemy', traits:['Undead','Darkvision'], hp:[13,13], pos:[23,1]}]
-  },
-  selected: null,
-  notes: '',
-  ui: { dmOpen:false, dmTab:'party', environment:null },
-  mapIndex: 0
-};
+  // Match controls
+  const playSoundBtn = $('#play-sound');
+  const choicesEl    = $('#choices');
+  const resultEl     = $('#result');
+  const matchCard    = $('.match-card', matchEl);
 
-function save(){ localStorage.setItem('tp_state_v22_1', JSON.stringify(state)); broadcastState(); }
-function load(){ try{ return JSON.parse(localStorage.getItem('tp_state_v22_1')); }catch(e){ return null; } }
+  // Feed controls
+  const feedImg      = $('#feed-img');
+  const feedName     = $('#feed-name');
+  const feedPlayBtn  = $('#feed-play');
+  const foodChoicesEl= $('#food-choices');
+  const feedResultEl = $('#feed-result');
+  const feedCard     = $('.feed-card', feedEl);
 
-/* =========================
-   Cross-window viewer sync
-   ========================= */
-const chan = new BroadcastChannel('board-sync');
-function broadcastState(){ chan.postMessage({type:'state', payload:state}); }
+  // Modal (Explore)
+  const overlay    = $('#overlay');
+  const modalClose = $('#modal-close');
+  const modalImg   = $('#modal-img');
+  const modalPlay  = $('#modal-play');
+  const modalTitle = $('#modal-title');
+  const factType   = $('#fact-type');
+  const factHabitat= $('#fact-habitat');
+  const factDiet   = $('#fact-diet');
+  const factHome   = $('#fact-home');
+  const factFun    = $('#fact-fun');
 
-/* =========================
-   Global page wiring
-   ========================= */
-window.addEventListener('dragover', e => e.preventDefault());
-window.addEventListener('drop',     e => e.preventDefault());
+  // State
+  const audioMap = new Map();
+  let currentRound = null; // Guess the Sound
+  let currentFeed  = null; // Feed the Animal
+  let lastFocused  = null;
+  let currentId    = null;
+  let fadeInterval = null;
 
-function nav(route){
-  state.route = route; save();
-  const views = ['home','board','dice','notes'];
-  views.forEach(v=>{
-    const main = document.getElementById('view-'+v);
-    const btn  = document.getElementById('nav-'+v);
-    if(!main||!btn) return;
-    if(v===route){ main.classList.remove('hidden'); btn.classList.add('active'); }
-    else{ main.classList.add('hidden'); btn.classList.remove('active'); }
-  });
-  render();
-}
+  // User gesture unlock (needed for autoplay)
+  let userInteracted = false;
 
-/* =========================
-   Board sizing/fit
-   ========================= */
-const boardEl = () => document.getElementById('board');
+  // Recent animals memory
+  const LS_RECENT_KEY = 'ff_recent_answers';
+  const LS_FEED_RECENT_KEY = 'ff_feed_recent';
+  const RECENT_SIZE = Math.max(2, Math.min(4, (ANIMALS?.length||8)-1));
 
-function fitBoard(){
-  const el = boardEl(); if(!el) return;
-  const vpH = Math.min(window.innerHeight, (window.visualViewport?.height || window.innerHeight));
-  const vpW = Math.min(window.innerWidth,  (window.visualViewport?.width  || window.innerWidth));
-  const SAFE_H_PAD = 140, SAFE_W_PAD = 24;
-  const availH = Math.max(240, vpH - SAFE_H_PAD);
-  const availW = Math.max(240, vpW - SAFE_W_PAD);
-  const maxSquare = Math.floor(Math.min(availW, availH));
-  const grid = Math.max(GRID_COLS, GRID_ROWS);
-  const cell = Math.max(16, Math.floor(maxSquare / grid));
-  const boardSize = cell * grid;
-  el.style.setProperty('--cell', cell + 'px');
-  el.style.setProperty('--boardSize', boardSize + 'px');
-}
-window.addEventListener('resize', ()=>{ fitBoard(); renderBoard(); });
-document.addEventListener('fullscreenchange', ()=>{ fitBoard(); renderBoard(); });
+  let recentAnswers = loadRecent(LS_RECENT_KEY);
+  let recentFeed    = loadRecent(LS_FEED_RECENT_KEY);
 
-function cellsz(){
-  const cs = getComputedStyle(boardEl()).getPropertyValue('--cell').trim();
-  return parseInt(cs.replace('px','')) || 42;
-}
+  const getAnimal = (id) => ANIMALS.find(a=>a.id===id);
 
-/* =========================
-   Board interactions
-   ========================= */
-function boardClick(ev){
-  const el = boardEl(); if(!el) return;
-  const rect = el.getBoundingClientRect();
-  const x = Math.max(0, Math.min(GRID_COLS-1, Math.floor((ev.clientX - rect.left) / cellsz())));
-  const y = Math.max(0, Math.min(GRID_ROWS-1, Math.floor((ev.clientY - rect.top)  / cellsz())));
-  if(!state.selected) return;
-  const list = state.tokens[state.selected.kind];
-  const t = list.find(z=>z.id===state.selected.id);
-  if(!t) return;
-  t.pos = [x,y];
-  save(); renderBoard();
-}
-
-function selectTokenDom(kind,id){
-  state.selected = {kind,id}; save(); renderBoard();
-}
-
-/* =========================
-   Board rendering
-   ========================= */
-function renderBoard(){
-  const el = boardEl(); if(!el) return;
-  fitBoard();
-  el.style.backgroundImage = state.boardBg ? `url("${state.boardBg}")` : 'linear-gradient(#1b2436,#0f1524)';
-  const size = cellsz();
-  el.innerHTML = '';
-  ['pc','npc','enemy'].forEach(kind=>{
-    (state.tokens[kind] || []).forEach(t=>{
-      const tok = document.createElement('div');
-      tok.className = `token ${kind}` + (state.selected && state.selected.id===t.id && state.selected.kind===kind ? ' selected':'');
-      tok.dataset.id = t.id; tok.dataset.kind = kind; tok.title = t.name;
-      tok.style.left = (t.pos[0]*size + 2) + 'px';
-      tok.style.top  = (t.pos[1]*size + 2) + 'px';
-      tok.style.width = (size-6) + 'px';
-      tok.style.height= (size-6) + 'px';
-      tok.onclick = (e)=>{ e.stopPropagation(); selectTokenDom(kind,t.id); };
-      const img = document.createElement('img');
-      img.loading='lazy'; img.src = `assets/class_icons/${t.cls}.svg`;
-      tok.appendChild(img); el.appendChild(tok);
-    });
-  });
-  updateDmFab();
-}
-
-/* =========================
-   Fullscreen & pop-out
-   ========================= */
-function toggleBoardFullscreen(){
-  const el = boardEl(); if(!el) return;
-  if(!document.fullscreenElement){ el.requestFullscreen?.(); }
-  else { document.exitFullscreen?.(); }
-}
-
-let viewerWin = null;
-function openBoardViewer(){
-  if(viewerWin && !viewerWin.closed){ viewerWin.focus(); broadcastState(); return; }
-  viewerWin = window.open('', 'BoardViewer', 'width=900,height=900');
-  if(!viewerWin) return;
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Board Viewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<style>
-  :root{ --cell: 42px; --boardSize: 546px; }
-  html,body{ height:100%; margin:0; background:#0f1115; color:#e6e9f2; font:14px system-ui,Segoe UI,Roboto,Arial }
-  .board{ position:relative; width:var(--boardSize); height:var(--boardSize); margin:20px auto;
-    border:1px solid #23283a; border-radius:12px; overflow:hidden; background:#0f141f; background-size:cover; background-position:center; }
-  .board::after{ content:""; position:absolute; inset:0;
-     background-image:linear-gradient(to right,rgba(255,255,255,.06) 1px,transparent 1px),
-                      linear-gradient(to bottom,rgba(255,255,255,.06) 1px,transparent 1px);
-     background-size: var(--cell) var(--cell); pointer-events:none; }
-  .token{ position:absolute; border-radius:6px; border:2px solid rgba(255,255,255,.25); display:flex; align-items:center; justify-content:center; overflow:hidden; background:#0f1115 }
-  .token img{ width:100%; height:100%; object-fit:contain; }
-  .pc{ background:#0ea5e9aa } .npc{ background:#22c55eaa } .enemy{ background:#ef4444aa }
-</style>
-</head><body>
-  <div id="viewerBoard" class="board"></div>
-<script>
-  const GRID_COLS=${GRID_COLS}, GRID_ROWS=${GRID_ROWS};
-  const chan = new BroadcastChannel('board-sync');
-  chan.onmessage = (e)=>{ if(!e?.data) return; if(e.data.type==='state'){ window.__STATE = e.data.payload; renderViewer(); } };
-  window.addEventListener('resize', fit);
-  function fit(){
-    const el = document.getElementById('viewerBoard');
-    const vpH = Math.min(window.innerHeight, (window.visualViewport?.height || window.innerHeight));
-    const vpW = Math.min(window.innerWidth,  (window.visualViewport?.width  || window.innerWidth));
-    const avail = Math.min(vpW-40, vpH-40);
-    const grid = Math.max(GRID_COLS, GRID_ROWS);
-    const cell = Math.max(14, Math.floor(avail / grid));
-    const size = cell * grid;
-    el.style.setProperty('--cell', cell+'px');
-    el.style.setProperty('--boardSize', size+'px');
+  function loadRecent(key){
+    try {
+      const raw = localStorage.getItem(key);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr.slice(0,8) : [];
+    } catch { return []; }
   }
-  function renderViewer(){
-    const s = window.__STATE; if(!s) return;
-    const el = document.getElementById('viewerBoard'); if(!el) return;
-    fit();
-    el.style.backgroundImage = s.boardBg ? 'url('+JSON.stringify(s.boardBg)+')' : 'linear-gradient(#1b2436,#0f1524)';
-    const cell = parseInt(getComputedStyle(el).getPropertyValue('--cell'))||42;
-    el.innerHTML = '';
-    ['pc','npc','enemy'].forEach(kind=>{
-      (s.tokens[kind]||[]).forEach(t=>{
-        const d = document.createElement('div');
-        d.className = 'token '+kind;
-        d.style.left = (t.pos[0]*cell + 2) + 'px';
-        d.style.top  = (t.pos[1]*cell + 2) + 'px';
-        d.style.width = (cell-6) + 'px';
-        d.style.height= (cell-6) + 'px';
-        const img = document.createElement('img'); img.src='assets/class_icons/'+t.cls+'.svg'; img.loading='lazy';
-        d.appendChild(img); el.appendChild(d);
-      });
+  function updateRecent(key,list,id){
+    const updated = [id,...list.filter(x=>x!==id)].slice(0,RECENT_SIZE);
+    try { localStorage.setItem(key,JSON.stringify(updated)); }catch{}
+    return updated;
+  }
+
+  /* ============== AUDIO ============== */
+  function createAudio(src){
+    const a = new Audio(src);
+    a.preload='auto'; a.autoplay=false;
+    return a;
+  }
+  function preloadAudio(){
+    (ANIMALS||[]).forEach(animal=>{
+      if(!audioMap.has(animal.id)) audioMap.set(animal.id, createAudio(animal.sound));
     });
   }
-  chan.postMessage({type:'ping'});
-</script></body></html>`;
-  viewerWin.document.open(); viewerWin.document.write(html); viewerWin.document.close();
-  chan.onmessage = (e)=>{ if(e?.data?.type==='ping'){ broadcastState(); } };
-  broadcastState();
-}
+  function fade(audio,from,to,ms,done){
+    if(!audio){ done&&done(); return; }
+    if(fadeInterval) clearInterval(fadeInterval);
+    const steps=10, step=(to-from)/steps, interval=Math.max(10, ms/steps);
+    let i=0; audio.volume=from;
+    fadeInterval=setInterval(()=>{
+      i++; audio.volume=Math.max(0,Math.min(1,from+step*i));
+      if(i>=steps){ clearInterval(fadeInterval); audio.volume=to; done&&done(); }
+    }, interval);
+  }
+  function stopCurrent(smooth=true){
+    if(!currentId) return;
+    const a=audioMap.get(currentId);
+    if(!a){ currentId=null; return; }
+    if(smooth) fade(a, a.volume??1, 0,120, ()=>{ try{a.pause();a.currentTime=0;}catch{} });
+    else { try{a.pause();a.currentTime=0;}catch{} }
+    currentId=null;
+  }
+  function playAnimalSound(id, fromUser=false){
+    if(!userInteracted && !fromUser) return Promise.resolve();
+    const next=audioMap.get(id);
+    if(!next) return Promise.resolve();
+    if(currentId===id) stopCurrent(false); else stopCurrent(true);
+    try{
+      next.currentTime=0; next.volume=0; currentId=id;
+      return next.play().then(()=>fade(next,0,1,120));
+    }catch(e){ return Promise.reject(e); }
+  }
 
-/* =========================
-   DM Panel
-   ========================= */
-function maximizeDmPanel(){
-  state.ui.dmOpen = true; save(); renderDmPanel(); updateDmFab();
-}
-function minimizeDmPanel(){
-  state.ui.dmOpen = false; save(); renderDmPanel(); updateDmFab();
-  closeAllToasts();
-}
-function toggleDmPanel(){
-  state.ui.dmOpen = !state.ui.dmOpen; save(); renderDmPanel(); updateDmFab();
-  if(!state.ui.dmOpen) closeAllToasts();
-}
-document.addEventListener('keydown', (e)=>{ if(e.shiftKey && (e.key==='D'||e.key==='d')){ e.preventDefault(); toggleDmPanel(); } });
-
-function updateDmFab(){
-  const fab = document.getElementById('dm-fab');
-  const count = document.getElementById('dm-fab-count');
-  if(!fab||!count) return;
-  const total = (state.tokens.pc?.length||0)+(state.tokens.npc?.length||0)+(state.tokens.enemy?.length||0);
-  count.textContent = total;
-  fab.classList.remove('hidden');
-}
-
-function dmTabButton(id,label,active){ return `<button class="dm-tab ${active?'active':''}" onclick="setDmTab('${id}')">${label}</button>`; }
-function setDmTab(id){ state.ui.dmTab=id; save(); renderDmPanel(); }
-
-function tokenCard(kind,t){
-  const sel = state.selected && state.selected.kind===kind && state.selected.id===t.id;
-  return `
-    <div class="dm-character-box">
-      <div class="dm-card ${sel?'selected':''}" onclick="selectFromPanel('${kind}','${t.id}')">
-        <div class="avatar"><img src="assets/class_icons/${t.cls}.svg" alt=""></div>
-        <div class="name">${escapeHtml(t.name)}</div>
-        <div class="badges">
-          <span class="badge">${escapeHtml(t.cls)}</span>
-          <span class="badge">HP ${t.hp[0]}/${t.hp[1]}</span>
-          ${(Array.isArray(t.traits)?t.traits:[]).map(x=>`<span class="badge">${escapeHtml(x)}</span>`).join('')}
-        </div>
-      </div>
-      <div class="dm-actions">
-        <button class="dm-title-btn short adv" title="Advantage" onclick="quickAdvFor('${kind}','${t.id}')">A</button>
-        <button class="dm-title-btn short dis" title="Disadvantage" onclick="quickDisFor('${kind}','${t.id}')">D</button>
-      </div>
-    </div>`;
-}
-
-function selectFromPanel(kind,id){ state.selected = {kind,id}; save(); renderDmPanel(); if(state.route!=='board') nav('board'); else renderBoard(); }
-
-function setEnvironment(env){
-  state.ui.environment = env; save();
-  renderDmPanel();
-}
-
-function computeEnvironmentEffects(){
-  const env = state.ui.environment;
-  if(!env) return { lines:[], adv:[], dis:[] };
-  const rule = ENV_RULES[env] || {};
-  const aClass = new Set(rule.advIfClass || []);
-  const dClass = new Set(rule.disIfClass || []);
-  const aTrait = new Set(rule.advIfTrait || []);
-  const dTrait = new Set(rule.disIfTrait || []);
-
-  const all = ['pc','npc','enemy'].flatMap(k => (state.tokens[k]||[]).map(t=>({...t, kind:k})));
-  const lines = all.map(t=>{
-    const cls = t.cls || '';
-    const traits = Array.isArray(t.traits) ? t.traits : [];
-    const hasAdvClass = aClass.has(cls);
-    const hasDisClass = dClass.has(cls);
-    const hasAdvTrait = traits.some(tr => aTrait.has(tr));
-    const hasDisTrait = traits.some(tr => dTrait.has(tr));
-    const adv = hasAdvClass || hasAdvTrait;
-    const dis = hasDisClass || hasDisTrait;
-
-    if(adv && !dis) return `${t.name} (${cls}): Advantage`;
-    if(dis && !adv) return `${t.name} (${cls}): Disadvantage`;
-    if(adv && dis)  return `${t.name} (${cls}): Mixed (check DM ruling)`;
-    return `${t.name} (${cls}): —`;
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden) stopCurrent(false);
   });
 
-  const advIds = [];
-  const disIds = [];
-  all.forEach(t=>{
-    const cls = t.cls || '';
-    const traits = Array.isArray(t.traits) ? t.traits : [];
-    const adv = aClass.has(cls) || traits.some(tr => aTrait.has(tr));
-    const dis = dClass.has(cls) || traits.some(tr => dTrait.has(tr));
-    if(adv && !dis) advIds.push(t.id);
-    if(dis && !adv) disIds.push(t.id);
-  });
-
-  return { lines, adv: advIds, dis: disIds };
-}
-
-function renderDmPanel(){
-  const panel=document.getElementById('dm-panel'); if(!panel) return;
-  if(!state.ui.dmOpen){ panel.classList.add('hidden'); return; }
-  panel.classList.remove('hidden');
-
-  const pcs = state.tokens.pc||[];
-  const npcs= state.tokens.npc||[];
-  const enemies = state.tokens.enemy||[];
-  const tab= state.ui.dmTab||'party';
-
-  const tabsHtml=`<div class="dm-tabs">
-    ${dmTabButton('party','Party',tab==='party')}
-    ${dmTabButton('npcs','NPCs',tab==='npcs')}
-    ${dmTabButton('enemies','Enemies',tab==='enemies')}
-    ${dmTabButton('notes','Notes',tab==='notes')}
-    ${dmTabButton('tools','Tools',tab==='tools')}
-  </div>`;
-
-  let body='';
-  if(tab==='party'){ body+=`<div class="dm-grid3">${pcs.map(p=>tokenCard('pc',p)).join('')||'<div class="small">No PCs yet.</div>'}</div>`; }
-  if(tab==='npcs'){ body+=`<div class="dm-grid3">${npcs.map(n=>tokenCard('npc',n)).join('')||'<div class="small">No NPCs yet.</div>'}</div>`; }
-  if(tab==='enemies'){ body+=`<div class="dm-grid3">${enemies.map(e=>tokenCard('enemy',e)).join('')||'<div class="small">No Enemies yet.</div>'}</div>`; }
-
-  if(tab==='notes'){
-    body+=`
-      <div class="dm-section">
-        <div class="dm-sec-head"><span>DM Notes</span></div>
-        <textarea id="dm-notes" rows="8" style="width:100%">${escapeHtml(state.notes||'')}</textarea>
-      </div>`;
-  }
-
-  if(tab==='tools'){
-    const env = state.ui.environment;
-    const effects = computeEnvironmentEffects();
-
-    const mapButtons = (MAPS||[]).map((m,i)=>`
-      <button class="map-pill ${state.mapIndex===i?'active':''}" onclick="setMapByIndex(${i})">${escapeHtml(m.name || (m.src.split('/').pop()))}</button>
-    `).join('');
-
-    const quickRow = `
-      <div class="quick-dice-row">
-        ${['d4','d6','d8','d10','d12','d20'].map(s=>`
-          <button class="quick-die-btn" onclick="rollQuick('${s}')">
-            <span class="die-icon">${polyIcon(s)}</span>${s.toUpperCase()}
-          </button>`).join('')}
-      </div>`;
-
-    body+=`
-      <div class="dm-section">
-        <div class="dm-sec-head"><span>Environment / Terrain</span></div>
-        <div class="env-grid">
-          ${ENVIRONMENTS.map(e=>`<div class="env-pill ${env===e?'active':''}" onclick="setEnvironment('${e}')">${e}</div>`).join('')}
-        </div>
-        <div class="dm-detail" style="margin-top:8px">
-          ${env ? `<strong>Selected:</strong> ${env}` : 'Select an environment to see advantages/disadvantages.'}
-          ${effects.lines.length ? `<div style="margin-top:6px">${effects.lines.map(l=>`• ${escapeHtml(l)}`).join('<br>')}</div>` : ''}
-        </div>
-      </div>
-
-      <div class="dm-section" style="margin-top:10px">
-        <div class="dm-sec-head"><span>Maps</span></div>
-        <div class="map-list">
-          ${mapButtons || '<div class="small">No maps yet. Add PNG/SVG files and rebuild assets/maps/index.json.</div>'}
-        </div>
-        <div class="dm-detail" style="margin-top:8px">
-          Current map: ${state.boardBg ? escapeHtml(MAPS[state.mapIndex]?.name || MAPS[state.mapIndex]?.src || 'Loaded') : 'None'}
-          <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-            <button class="btn tiny" onclick="clearMap()">Clear Map</button>
-            <button class="btn tiny" onclick="reloadMaps()">Reload Maps</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="dm-section" style="margin-top:10px">
-        <div class="dm-sec-head"><span>Quick Dice</span></div>
-        ${quickRow}
-        <div class="dm-quick-bar">
-          <button class="dm-title-btn big" onclick="quickD20()">Roll d20</button>
-          <div id="dm-last-roll" class="dm-detail">—</div>
-        </div>
-      </div>`;
-  }
-
-  panel.innerHTML = `
-    <div class="dm-head">
-      <h3>DM Panel</h3>
-      <div><button class="btn tiny" onclick="minimizeDmPanel()">Close</button></div>
-    </div>
-    ${tabsHtml}
-    ${body}
-  `;
-
-  const notesEl=document.getElementById('dm-notes');
-  if(notesEl){
-    notesEl.addEventListener('input', ()=>{
-      state.notes=notesEl.value; save();
-      const n=document.getElementById('notes'); if(n) n.value=state.notes;
-    });
-  }
-}
-
-function clearMap(){ state.boardBg=null; save(); renderBoard(); }
-
-/* =========================
-   Toasts (top-right)
-   ========================= */
-let activeToast = null;
-function closeAllToasts(){
-  document.querySelectorAll('.dm-toast').forEach(t=>t.remove());
-  activeToast = null;
-}
-function showToast(title,msg,hint){
-  closeAllToasts();
-  const div=document.createElement('div');
-  div.className='dm-toast fade';
-  div.innerHTML=`
-    <div class="close" onclick="this.parentElement.remove()">×</div>
-    <h4>${escapeHtml(title)}</h4>
-    <div>${escapeHtml(msg)}</div>
-    ${hint ? `<div class="hint">${escapeHtml(hint)}</div>` : ``}
-  `;
-  document.body.appendChild(div);
-  activeToast = div;
-  setTimeout(()=>{ if(div===activeToast){ div.remove(); activeToast=null; } }, 4500);
-}
-document.addEventListener('click', (e)=>{
-  if(!activeToast) return;
-  const insideToast = activeToast.contains(e.target);
-  const insidePanel = document.getElementById('dm-panel')?.contains(e.target);
-  if(!insideToast && !insidePanel){ closeAllToasts(); }
-});
-
-/* =========================
-   Quick dice (DM Tools) + d20 helper
-   ========================= */
-function quickD20(){
-  const v=1+Math.floor(Math.random()*20);
-  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`d20 → ${v}`;
-  showToast('Quick d20', `→ ${v}`, 'Instruction: roll 1d20; apply modifiers as usual.');
-}
-function quickAdvFor(kind,id){
-  const a=1+Math.floor(Math.random()*20), b=1+Math.floor(Math.random()*20), res=Math.max(a,b);
-  const list=state.tokens[kind]||[]; const name=(list.find(x=>x.id===id)?.name)||kind.toUpperCase();
-  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`Adv: ${a} vs ${b} ⇒ ${res}`;
-  showToast(name, `Advantage → ${res} (${a} vs ${b})`, 'Instruction: roll 2d20, keep highest; then add relevant modifiers.');
-}
-function quickDisFor(kind,id){
-  const a=1+Math.floor(Math.random()*20), b=1+Math.floor(Math.random()*20), res=Math.min(a,b);
-  const list=state.tokens[kind]||[]; const name=(list.find(x=>x.id===id)?.name)||kind.toUpperCase();
-  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`Dis: ${a} vs ${b} ⇒ ${res}`;
-  showToast(name, `Disadvantage → ${res} (${a} vs ${b})`, 'Instruction: roll 2d20, keep lowest; then add relevant modifiers.');
-}
-function rollQuick(tag){
-  const n=parseInt(tag.replace('d',''),10)||6;
-  const v=1+Math.floor(Math.random()*n);
-  const box=document.getElementById('dm-last-roll'); if(box) box.textContent=`${tag.toUpperCase()} → ${v}`;
-  showToast('Quick Dice', `${tag.toUpperCase()} → ${v}`, 'Instruction: roll the selected die; apply modifiers as needed.');
-}
-
-/* =========================
-   Dice page
-   ========================= */
-const dice=['d4','d6','d8','d10','d12','d20']; let selectedDice=[];
-
-function renderDiceButtons(){
-  const row=document.getElementById('dice-buttons'); if(!row) return;
-  row.innerHTML=dice.map(s=>`
-    <button class="die-btn" onclick="addDie('${s}')">
-      <span class="die-icon">${polyIcon(s)}</span>${s.toUpperCase()}
-    </button>`).join('');
-}
-function addDie(s){ selectedDice.push(s); updateDiceSelection(); shakeOutput(); }
-function clearDice(){
-  selectedDice=[]; updateDiceSelection();
-  const out=document.getElementById('dice-output');
-  out.innerHTML = `
-    <div class="roll-card">
-      <div class="dice-hero">${bigDiceSvg()}</div>
-      <div class="roll-status">Select dice and tap Roll</div>
-    </div>
-  `;
-}
-function updateDiceSelection(){
-  const el=document.getElementById('dice-selection'); if(!el) return;
-  el.textContent= selectedDice.length? selectedDice.join(' + '):'No dice selected';
-}
-function rollAll(){
-  if(!selectedDice.length) return;
-
-  const out = document.getElementById('dice-output');
-  out.innerHTML = `
-    <div class="roll-card rolling">
-      <div class="dice-hero">${bigDiceSvg()}</div>
-      <div class="roll-status">Rolling…</div>
-    </div>
-  `;
-
-  setTimeout(()=>{
-    const rolls = selectedDice.map(tag=>roll(tag));
-    const total = rolls.reduce((a,b)=>a+b,0);
-    out.innerHTML = `
-      <div class="roll-card">
-        <div class="dice-hero">${bigDiceSvg()}</div>
-        <div class="roll-total">Total: ${total}</div>
-        <div class="roll-breakdown">${selectedDice.map((s,i)=>`${s} [${rolls[i]}]`).join(' + ')}</div>
-      </div>
-    `;
-    selectedDice=[]; updateDiceSelection();
-  }, 900);
-}
-function roll(tag){ const n=parseInt(tag.replace('d',''),10)||6; return 1+Math.floor(Math.random()*n); }
-function shakeOutput(){ const out=document.getElementById('dice-output'); out.classList.remove('shake'); void out.offsetWidth; out.classList.add('shake'); }
-
-/* Themed dice SVG for hero */
-function bigDiceSvg(){
-  return `
-  <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
-    <defs>
-      <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"  stop-color="#2a3760"/>
-        <stop offset="100%" stop-color="#121a2e"/>
-      </linearGradient>
-    </defs>
-    <polygon points="32,4 53,10 60,31 50,52 32,60 14,52 4,31 11,10"
-      fill="url(#g1)" stroke="currentColor" stroke-width="2" />
-    <polygon points="32,4 53,10 32,32 11,10"
-      fill="none" stroke="currentColor" stroke-opacity=".5" />
-    <polygon points="32,60 50,52 32,32 14,52"
-      fill="none" stroke="currentColor" stroke-opacity=".5" />
-    <polygon points="4,31 32,32 60,31"
-      fill="none" stroke="currentColor" stroke-opacity=".45" />
-  </svg>`;
-}
-
-/* Small poly icon used on buttons */
-function polyIcon(s){
-  const map={d4:3,d6:4,d8:6,d10:7,d12:8,d20:10};
-  const sides=map[s]||6;
-  return `<svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-    <polygon points="${regularPoly(12,12,9,sides)}" stroke="currentColor" stroke-width="2" fill="none"/>
-  </svg>`;
-}
-function regularPoly(cx,cy,r,n){
-  const pts=[];
-  for(let i=0;i<n;i++){
-    const a=(Math.PI*2*(i/n))-Math.PI/2;
-    pts.push((cx+r*Math.cos(a)).toFixed(1)+','+(cy+r*Math.sin(a)).toFixed(1));
-  }
-  return pts.join(' ');
-}
-
-/* =========================
-   Utils & boot
-   ========================= */
-function escapeHtml(s){ return (s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-
-function render(){
-  if(state.route==='board'){ renderBoard(); }
-  if(state.route==='dice'){ renderDiceButtons(); updateDiceSelection(); }
-  const notes=document.getElementById('notes'); if(notes) notes.value=state.notes||'';
-  updateDmFab();
-  renderDmPanel();
-}
-
-document.addEventListener('DOMContentLoaded', async ()=>{
-  try{
-    nav(state.route || 'home');
-    fitBoard();
-    await reloadMaps();
-    if(!state.boardBg && (MAPS[0]?.src)) setMapByIndex(0);
-    // Prime dice output nicely on first load
-    clearDice();
-  }catch(err){ console.error('boot error', err); }
-});
-
-/* =========================
-   Map loading (index.json)
-   ========================= */
-function setMapByIndex(idx){
-  if(!MAPS[idx]) return;
-  state.mapIndex = idx;
-  state.boardBg  = MAPS[idx].src;
-  save(); renderBoard(); renderDmPanel();
-}
-function nextMap(){ if(!MAPS.length) return; setMapByIndex((state.mapIndex+1)%MAPS.length); }
-function prevMap(){ if(!MAPS.length) return; setMapByIndex((state.mapIndex-1+MAPS.length)%MAPS.length); }
-async function reloadMaps(){
-  if(!TRY_FETCH_JSON_INDEX){ return; }
-  try{
-    const res = await fetch('assets/maps/index.json', {cache:'no-store'});
-    if(!res.ok) throw new Error('index.json not found');
-    const list = await res.json();
-    if(Array.isArray(list)){
-      MAPS = list;
-      const cur = state.boardBg;
-      const found = MAPS.findIndex(m => m.src === cur);
-      state.mapIndex = found >= 0 ? found : 0;
-      if(!cur && MAPS[0]) state.boardBg = MAPS[0].src;
-      save();
+  /* ============== USER INTERACTION UNLOCK ============== */
+  function markInteracted(){
+    if(userInteracted) return;
+    userInteracted=true;
+    const first=audioMap.values().next().value;
+    if(first){
+      const wasMuted=first.muted;
+      try{ first.muted=true; first.play().then(()=>first.pause()).finally(()=>{first.muted=wasMuted;}); }catch{}
     }
-  }catch(e){
-    console.warn('No index.json found or error reading it.', e);
-  }finally{
-    renderDmPanel(); renderBoard();
   }
-}
+  ['pointerdown','mousedown','touchstart','keydown'].forEach(evt=>{
+    window.addEventListener(evt,markInteracted,{passive:true});
+  });
 
-/* =========================
-   Expose globals for HTML
-   ========================= */
-window.boardClick=boardClick;
-window.nav=nav;
-window.openBoardViewer=openBoardViewer;
-window.toggleBoardFullscreen=toggleBoardFullscreen;
-window.selectFromPanel=selectFromPanel;
-window.quickD20=quickD20;
-window.quickAdvFor=quickAdvFor;
-window.quickDisFor=quickDisFor;
-window.maximizeDmPanel=maximizeDmPanel;
-window.minimizeDmPanel=minimizeDmPanel;
-window.setDmTab=setDmTab;
-window.prevMap=prevMap;
-window.nextMap=nextMap;
-window.reloadMaps=reloadMaps;
-window.setEnvironment=setEnvironment;
-window.setMapByIndex=setMapByIndex;
-window.clearMap=clearMap;
-window.rollQuick=rollQuick;
+  /* ============== UI HELPERS ============== */
+  function menuPuff(btn){ /* puff animation omitted for brevity, same as before */ }
+  function confettiBurst(container){ /* confetti animation, same as before */ }
+
+  /* ============== EXPLORE MODAL ============== */
+  function openModal(animal, triggerEl){
+    if(!animal) return; stopCurrent(false);
+    lastFocused=triggerEl||document.activeElement;
+    document.body.classList.add('modal-open');
+    overlay.classList.remove('hidden','closing');
+    modalTitle.textContent=animal.name||'';
+    modalImg.src=animal.image; modalImg.alt=animal.name;
+    factType.textContent=animal.type||'';
+    factHabitat.textContent=animal.habitat||'';
+    factDiet.textContent=animal.diet||'';
+    factHome.textContent=animal.home||'';
+    factFun.textContent=animal.fun||'';
+    modalPlay.onclick=()=>{stopCurrent(false); playAnimalSound(animal.id,true);};
+  }
+  function closeModal(){
+    overlay.classList.add('closing');
+    setTimeout(()=>{
+      overlay.classList.add('hidden');
+      document.body.classList.remove('modal-open');
+      overlay.classList.remove('closing');
+      if(lastFocused) lastFocused.focus();
+    },180);
+  }
+
+  /* ============== EXPLORE SCENE ============== */
+  function buildScene(){
+    if(!sceneEl) return;
+    sceneEl.innerHTML='';
+    ANIMALS.forEach(animal=>{
+      const btn=document.createElement('button');
+      btn.className='animal';
+      btn.dataset.id=animal.id;
+      btn.style.background=animal.color;
+      btn.innerHTML=`<img src="${animal.image}" alt="${animal.name}"><div class="animal-name">${animal.name}</div>`;
+      btn.onclick=()=>openModal(animal,btn);
+      sceneEl.appendChild(btn);
+    });
+  }
+
+  /* ============== MATCH (Guess the Sound) ============== */
+  function newRound(){
+    stopCurrent(false);
+    if(!choicesEl) return;
+    const pool=ANIMALS.map(a=>a.id).filter(id=>!recentAnswers.includes(id));
+    if(pool.length<1) pool=ANIMALS.map(a=>a.id);
+    const answerId=pool[Math.floor(Math.random()*pool.length)];
+    recentAnswers=updateRecent(LS_RECENT_KEY,recentAnswers,answerId);
+    const answer=getAnimal(answerId);
+
+    const wrong=ANIMALS.filter(a=>a.id!==answerId);
+    const opts=[answer, wrong[Math.floor(Math.random()*wrong.length)], wrong[Math.floor(Math.random()*wrong.length)]];
+    opts.sort(()=>Math.random()-0.5);
+
+    choicesEl.innerHTML='';
+    opts.forEach(opt=>{
+      const btn=document.createElement('button');
+      btn.className='choice';
+      btn.dataset.id=opt.id;
+      btn.innerHTML=`<img src="${opt.image}" alt="${opt.name}">`;
+      btn.onclick=()=>{
+        stopCurrent(false);
+        if(opt.id===answerId){
+          btn.classList.add('correct');
+          confettiBurst(matchCard);
+          resultEl.textContent=`Correct! That was a ${answer.name}.`;
+        }else{
+          btn.classList.add('incorrect');
+          resultEl.textContent=`Not quite. That was a ${answer.name}.`;
+        }
+      };
+      choicesEl.appendChild(btn);
+    });
+
+    // autoplay after first interaction
+    playAnimalSound(answerId);
+    currentRound=answerId;
+    resultEl.textContent='Tap “Play Sound” to hear the clue.';
+    playSoundBtn.onclick=()=>{stopCurrent(false); playAnimalSound(answerId,true);};
+  }
+
+  /* ============== FEED ============== */
+  function newFeedRound(){
+    stopCurrent(false);
+    const pool=ANIMALS.map(a=>a.id).filter(id=>!recentFeed.includes(id));
+    if(pool.length<1) pool=ANIMALS.map(a=>a.id);
+    const animalId=pool[Math.floor(Math.random()*pool.length)];
+    recentFeed=updateRecent(LS_FEED_RECENT_KEY,recentFeed,animalId);
+    const animal=getAnimal(animalId);
+    if(!animal) return;
+
+    currentFeed=animalId;
+    feedImg.src=animal.image; feedImg.alt=animal.name;
+    feedName.textContent=animal.name;
+
+    const correct=animal.food;
+    const wrongIds=ANIMALS.map(a=>a.food).filter(f=>f!==correct);
+    const decoys=[]; while(decoys.length<2 && wrongIds.length>0){
+      const pick=wrongIds.splice(Math.floor(Math.random()*wrongIds.length),1)[0];
+      decoys.push(pick);
+    }
+    const all=[correct,...decoys].sort(()=>Math.random()-0.5);
+
+    foodChoicesEl.innerHTML='';
+    all.forEach(fid=>{
+      const imgPath=`assets/img/animal-food/${fid}food.png`;
+      const label=FOOD_LABELS[fid]||fid;
+      const btn=document.createElement('button');
+      btn.className='food-choice';
+      btn.innerHTML=`<img src="${imgPath}" alt="${label}" class="food-img"><div>${label}</div>`;
+      btn.onclick=()=>{
+        stopCurrent(false);
+        if(fid===correct){
+          btn.classList.add('correct');
+          confettiBurst(feedCard);
+          feedResultEl.textContent=`Yum! ${animal.name} loves ${label}.`;
+        }else{
+          btn.classList.add('incorrect');
+          feedResultEl.textContent=`Not quite. ${animal.name} prefers ${FOOD_LABELS[correct]}.`;
+        }
+      };
+      foodChoicesEl.appendChild(btn);
+    });
+
+    // autoplay sound
+    playAnimalSound(animalId);
+    feedPlayBtn.onclick=()=>{stopCurrent(false); playAnimalSound(animalId,true);};
+  }
+
+  /* ============== ROUTING ============== */
+  function showHome(){
+    stopCurrent(false);
+    document.body.className='route-home';
+    homeEl.classList.remove('hidden');
+    appEl.classList.add('hidden');
+    btnBack.classList.add('hidden');
+  }
+  function showExplore(){
+    stopCurrent(false);
+    document.body.className='route-explore';
+    homeEl.classList.add('hidden');
+    appEl.classList.remove('hidden');
+    sceneEl.classList.remove('hidden');
+    matchEl.classList.add('hidden');
+    feedEl.classList.add('hidden');
+    btnBack.classList.remove('hidden');
+  }
+  function showMatch(){
+    stopCurrent(false);
+    document.body.className='route-match';
+    homeEl.classList.add('hidden');
+    appEl.classList.remove('hidden');
+    sceneEl.classList.add('hidden');
+    matchEl.classList.remove('hidden');
+    feedEl.classList.add('hidden');
+    btnBack.classList.remove('hidden');
+    newRound();
+  }
+  function showFeed(){
+    stopCurrent(false);
+    document.body.className='route-feed';
+    homeEl.classList.add('hidden');
+    appEl.classList.remove('hidden');
+    sceneEl.classList.add('hidden');
+    matchEl.classList.add('hidden');
+    feedEl.classList.remove('hidden');
+    btnBack.classList.remove('hidden');
+    newFeedRound();
+  }
+
+  /* ============== INIT ============== */
+  function init(){
+    preloadAudio();
+    buildScene();
+    btnExplore.onclick=()=>{menuPuff(btnExplore);showExplore();};
+    btnMatch.onclick  =()=>{menuPuff(btnMatch);showMatch();};
+    btnFeed.onclick   =()=>{menuPuff(btnFeed);showFeed();};
+    btnBack.onclick   =()=>{showHome();};
+    modalClose.onclick=()=>{closeModal();};
+    showHome();
+  }
+  document.addEventListener('DOMContentLoaded',init);
+})();

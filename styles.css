@@ -1,9 +1,8 @@
 /* ===============================
    Farm Friends – Stylesheet
-   Version: v0.4.1-beta
-   - Auto-play support styles
-   - Feed entrance animation (walk-in → focus → reveal choices)
-   - Larger, rounder feedback popups + confetti
+   Version: v0.4.3-beta
+   - Feed uses image-based food choices
+   - Keeps previous animations & feedback
    =============================== */
 
 :root{
@@ -44,8 +43,8 @@ body::before{
 /* Section-specific tints */
 body.route-home   { --bg-overlay: rgba(255,255,240,0.55); }
 body.route-explore{ --bg-overlay: rgba(255,255,255,0.62); }
-body.route-match  { --bg-overlay: rgba(0,0,0,0.25); } /* darker for focus */
-body.route-feed   { --bg-overlay: rgba(0,0,0,0.18); } /* slightly lighter than Match but focused */
+body.route-match  { --bg-overlay: rgba(0,0,0,0.25); }
+body.route-feed   { --bg-overlay: rgba(0,0,0,0.18); }
 
 #home, main#app, .scene, .match, .feed { position:relative; z-index:1; }
 
@@ -264,7 +263,7 @@ body.modal-open{ overflow:hidden; }
   display:grid; grid-template-columns: repeat(auto-fit, minmax(170px,1fr)); gap:1rem;
   opacity:0; transform: translateY(12px);
 }
-.food-choice {
+.food-choice{
   background:#fff;
   border:3px solid var(--brand-brown);
   border-radius: 26px;
@@ -283,7 +282,7 @@ body.modal-open{ overflow:hidden; }
   color: var(--brand-brown);
 }
 .food-choice img.food-img {
-  width: 90px;
+  width: 100px;
   height: auto;
   object-fit: contain;
 }

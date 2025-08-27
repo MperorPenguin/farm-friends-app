@@ -1,5 +1,5 @@
 // Farm Friends — Animals data (8 animals)
-// Added "food" (primary correct choice) for Feed game
+// "food" = primary food key for labels; images are per-animal at assets/img/animal-food/{animalid}food.png
 
 const ANIMALS = [
   {
@@ -108,19 +108,15 @@ const ANIMALS = [
   }
 ];
 
-// Food bank: id → {label, emoji, why}
-// Keep fun, clear explanations for feedback text.
-const FOOD = {
-  grass:   { label: 'Grass',   emoji: '🌿', why: 'It’s soft and yummy for grazing animals.' },
-  hay:     { label: 'Hay',     emoji: '🌾', why: 'Dried grass that’s perfect for stables.' },
-  grains:  { label: 'Grains',  emoji: '🌾', why: 'Tiny seeds that give animals energy.' },
-  seeds:   { label: 'Seeds',   emoji: '🌱', why: 'Little bites chickens and birds peck at.' },
-  insects: { label: 'Insects', emoji: '🐛', why: 'Tiny bugs that some birds snack on.' },
-  plants:  { label: 'Plants',  emoji: '🍀', why: 'Leafy greens ducks and others nibble.' },
-  leaves:  { label: 'Leaves',  emoji: '🍃', why: 'Crunchy greens goats love to munch.' },
-  veggies: { label: 'Veggies', emoji: '🥕', why: 'Tasty vegetables pigs enjoy.' },
-  oats:    { label: 'Oats',    emoji: '🥣', why: 'A hearty treat for big animals.' }
+// Food label helper (for captions under food images)
+const FOOD_LABELS = {
+  grass:'Grass',
+  hay:'Hay',
+  grains:'Grains',
+  seeds:'Seeds',
+  insects:'Insects',
+  plants:'Plants',
+  leaves:'Leaves',
+  veggies:'Vegetables',
+  oats:'Oats'
 };
-
-// Optional: decoy pool preference per animal (fallback uses all)
-const FOOD_DECOYS = ['grass','hay','grains','seeds','insects','plants','leaves','veggies','oats'];
